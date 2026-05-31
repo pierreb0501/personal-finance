@@ -52,7 +52,7 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
         subtype: acc.subtype ?? '',
         balanceCurrent: acc.balances.current ?? 0,
         balanceAvailable: acc.balances.available ?? null,
-        isoCurrencyCode: acc.iso_currency_code ?? 'CAD',
+        isoCurrencyCode: (acc as any).iso_currency_code ?? 'CAD',
         updatedAt: ts,
       })
       .onConflictDoUpdate({
