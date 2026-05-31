@@ -11,7 +11,9 @@ export async function POST() {
       optional_products: [Products.Investments],
       country_codes: [CountryCode.Ca, CountryCode.Us],
       language: 'en',
-      redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback`,
+      ...(process.env.NEXT_PUBLIC_APP_URL
+        ? { redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback` }
+        : {}),
     })
     return NextResponse.json({ link_token: response.data.link_token })
   } catch (err) {

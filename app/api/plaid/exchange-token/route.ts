@@ -8,6 +8,10 @@ export async function POST(req: NextRequest) {
   try {
     const { public_token, institution_name } = await req.json()
 
+    if (!public_token || typeof public_token !== 'string') {
+      return NextResponse.json({ error: 'public_token is required' }, { status: 400 })
+    }
+
     const exchangeRes = await plaidClient.itemPublicTokenExchange({
       public_token: public_token,
     })
