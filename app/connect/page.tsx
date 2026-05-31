@@ -9,17 +9,25 @@ export default function ConnectPage() {
   const router = useRouter()
   const [linkToken, setLinkToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/plaid/create-link-token', { method: 'POST' })
       .then((r) => r.json())
-      .then((data) => setLinkToken(data.link_token))
+      .then((data) => {
+        if (data.link_token) {
+          setLinkToken(data.link_token)
+        } else {
+          setError('Failed to initialise Plaid. Please refresh and try again.')
+        }
+      })
+      .catch(() => setError('Failed to reach server. Please refresh and try again.'))
   }, [])
 
   const onSuccess = useCallback(
     async (publicToken: string, metadata: { institution?: { name?: string } | null }) => {
       setLoading(true)
-      await fetch('/api/plaid/exchange-token', {
+      const res = await fetch('/api/plaid/exchange-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -27,6 +35,11 @@ export default function ConnectPage() {
           institution_name: metadata?.institution?.name ?? 'Unknown',
         }),
       })
+      if (!res.ok) {
+        setError('Connection failed. Please try again.')
+        setLoading(false)
+        return
+      }
       router.push('/')
     },
     [router],
@@ -44,6 +57,7 @@ export default function ConnectPage() {
         <p className="text-muted-foreground">
           Connect TD, Amex Canada, or Wealthsimple to get started.
         </p>
+        {error && <p className="text-red-500 text-sm">{error}</p>}
         <Button onClick={() => open()} disabled={!ready || loading}>
           {loading ? 'Connecting…' : 'Connect a bank'}
         </Button>
