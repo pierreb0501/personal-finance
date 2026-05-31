@@ -1,0 +1,32 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { plaidClient } from '@/lib/plaid'
+import { db } from '@/lib/db'
+import { items } from '@/lib/db/schema'
+import { syncAll } from '@/lib/sync'
+
+export async function POST(req: NextRequest) {
+  try {
+    const { public_token, institution_name } = await req.json()
+
+    const exchangeRes = await plaidClient.itemPublicTokenExchange({
+      public_token: public_token,
+    })
+    const { access_token, item_id } = exchangeRes.data
+
+    db.insert(items).values({
+      id: crypto.randomUUID(),
+      plaidItemId: item_id,
+      accessToken: access_token,
+      cursor: null,
+      institutionName: institution_name ?? 'Unknown',
+      createdAt: Math.floor(Date.now() / 1000),
+    }).run()
+
+    await syncAll()
+
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    console.error('exchange-token error:', err)
+    return NextResponse.json({ error: 'Failed to exchange token' }, { status: 500 })
+  }
+}
