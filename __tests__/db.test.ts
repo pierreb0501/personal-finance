@@ -52,6 +52,9 @@ describe('query functions', () => {
       { id: '1', date: '2026-05-28', totalAssets: 10000, totalLiabilities: 2000, netWorth: 8000, investmentsValue: 3000, createdAt: now() },
       { id: '2', date: '2026-05-29', totalAssets: 10500, totalLiabilities: 2000, netWorth: 8500, investmentsValue: 3100, createdAt: now() },
     ]).run()
+    db.insert(schema.snapshots).values({
+      id: '3', date: '2026-01-01', totalAssets: 9000, totalLiabilities: 2000, netWorth: 7000, investmentsValue: 2800, createdAt: now(),
+    }).run()
     const history = getSnapshotHistory(db, 30)
     expect(history).toHaveLength(2)
     expect(history[0].date).toBe('2026-05-28')

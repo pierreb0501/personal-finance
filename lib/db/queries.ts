@@ -2,6 +2,15 @@ import { desc, eq, and, gte, sql, asc } from 'drizzle-orm'
 import * as schema from './schema'
 import type { DB } from './index'
 
+function localFirstOfMonth(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function localDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function getLatestSnapshot(db: DB) {
   return db
     .select()
@@ -14,7 +23,7 @@ export function getLatestSnapshot(db: DB) {
 export function getSnapshotHistory(db: DB, days: number) {
   const since = new Date()
   since.setDate(since.getDate() - days)
-  const sinceStr = since.toISOString().slice(0, 10)
+  const sinceStr = localDateString(since)
   return db
     .select()
     .from(schema.snapshots)
@@ -24,9 +33,7 @@ export function getSnapshotHistory(db: DB, days: number) {
 }
 
 export function getMonthlySpend(db: DB): number {
-  const firstOfMonth = new Date()
-  firstOfMonth.setDate(1)
-  const since = firstOfMonth.toISOString().slice(0, 10)
+  const since = localFirstOfMonth()
   const result = db
     .select({ total: sql<number>`COALESCE(SUM(${schema.transactions.amount}), 0)` })
     .from(schema.transactions)
@@ -42,9 +49,7 @@ export function getMonthlySpend(db: DB): number {
 }
 
 export function getCategoryBreakdown(db: DB) {
-  const firstOfMonth = new Date()
-  firstOfMonth.setDate(1)
-  const since = firstOfMonth.toISOString().slice(0, 10)
+  const since = localFirstOfMonth()
   return db
     .select({
       category: schema.transactions.category,

@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import path from 'path'
 import * as schema from './schema'
 
-const sqlite = new Database('finance.db')
+const sqlite = new Database(path.join(process.cwd(), 'finance.db'))
 sqlite.pragma('journal_mode = WAL')
 sqlite.pragma('foreign_keys = ON')
 
