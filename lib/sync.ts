@@ -11,8 +11,13 @@ type Item = typeof schema.items.$inferSelect
 export async function syncAll(db: DB = defaultDb) {
   const allItems = db.select().from(schema.items).all()
   for (const item of allItems) {
-    await syncItem(db, item)
+    try {
+      await syncItem(db, item)
+    } catch (err) {
+      console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
+    }
   }
+  writeSnapshot(db)  // Once, after all items, so snapshot reflects complete state
 }
 
 export async function syncItem(db: DB, item: Item) {
@@ -28,9 +33,6 @@ export async function syncItem(db: DB, item: Item) {
   } catch (err) {
     console.log(`Holdings sync skipped for item ${item.institutionName}:`, (err as Error).message)
   }
-
-  // 4. Write snapshot
-  writeSnapshot(db)
 }
 
 async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
@@ -40,17 +42,9 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
   const ts = Math.floor(Date.now() / 1000)
 
   for (const acc of plaidAccounts) {
-    const existing = db
-      .select({ id: schema.accounts.id })
-      .from(schema.accounts)
-      .where(eq(schema.accounts.plaidAccountId, acc.account_id))
-      .get()
-
-    const internalId = existing?.id ?? crypto.randomUUID()
-
     db.insert(schema.accounts)
       .values({
-        id: internalId,
+        id: crypto.randomUUID(),
         itemId: item.id,
         plaidAccountId: acc.account_id,
         name: acc.name,
@@ -62,7 +56,7 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
         updatedAt: ts,
       })
       .onConflictDoUpdate({
-        target: schema.accounts.id,
+        target: schema.accounts.plaidAccountId,
         set: {
           balanceCurrent: acc.balances.current ?? 0,
           balanceAvailable: acc.balances.available ?? null,
@@ -71,7 +65,12 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
       })
       .run()
 
-    map.set(acc.account_id, internalId)
+    const row = db
+      .select({ id: schema.accounts.id })
+      .from(schema.accounts)
+      .where(eq(schema.accounts.plaidAccountId, acc.account_id))
+      .get()!
+    map.set(acc.account_id, row.id)
   }
 
   return map
@@ -143,35 +142,37 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   })
 
   const internalAccountIds = Array.from(accountMap.values())
-  if (internalAccountIds.length > 0) {
-    // Delete holdings WHERE account_id IN (SELECT id FROM accounts WHERE item_id = ?)
-    db.delete(schema.holdings)
-      .where(inArray(schema.holdings.accountId, internalAccountIds))
-      .run()
-  }
-
   const { holdings, securities } = response.data
   const securityMap = new Map(securities.map((s) => [s.security_id, s]))
   const ts = Math.floor(Date.now() / 1000)
 
-  for (const h of holdings) {
-    const accountId = accountMap.get(h.account_id)
-    if (!accountId) continue
-    const security = securityMap.get(h.security_id)
+  db.transaction((tx) => {
+    if (internalAccountIds.length > 0) {
+      // Delete holdings WHERE account_id IN (SELECT id FROM accounts WHERE item_id = ?)
+      tx.delete(schema.holdings)
+        .where(inArray(schema.holdings.accountId, internalAccountIds))
+        .run()
+    }
 
-    db.insert(schema.holdings)
-      .values({
-        id: crypto.randomUUID(),
-        accountId,
-        securityName: security?.name ?? 'Unknown',
-        tickerSymbol: security?.ticker_symbol ?? null,
-        quantity: h.quantity,
-        institutionValue: h.institution_value ?? 0,
-        costBasis: h.cost_basis ?? null,
-        updatedAt: ts,
-      })
-      .run()
-  }
+    for (const h of holdings) {
+      const accountId = accountMap.get(h.account_id)
+      if (!accountId) continue
+      const security = securityMap.get(h.security_id)
+
+      tx.insert(schema.holdings)
+        .values({
+          id: crypto.randomUUID(),
+          accountId,
+          securityName: security?.name ?? 'Unknown',
+          tickerSymbol: security?.ticker_symbol ?? null,
+          quantity: h.quantity,
+          institutionValue: h.institution_value ?? 0,
+          costBasis: h.cost_basis ?? null,
+          updatedAt: ts,
+        })
+        .run()
+    }
+  })
 }
 
 function writeSnapshot(db: DB) {
@@ -180,8 +181,8 @@ function writeSnapshot(db: DB) {
 
   const accountTotals = db
     .select({
-      assets: sql<number>`COALESCE(SUM(CASE WHEN type != 'credit' THEN balance_current ELSE 0 END), 0)`,
-      liabilities: sql<number>`COALESCE(SUM(CASE WHEN type = 'credit' THEN balance_current ELSE 0 END), 0)`,
+      assets: sql<number>`COALESCE(SUM(CASE WHEN type IN ('depository', 'investment', 'other') THEN balance_current ELSE 0 END), 0)`,
+      liabilities: sql<number>`COALESCE(SUM(CASE WHEN type IN ('credit', 'loan') THEN balance_current ELSE 0 END), 0)`,
     })
     .from(schema.accounts)
     .get()

@@ -14,7 +14,7 @@ jest.mock('@/lib/plaid', () => ({
 }))
 
 import { plaidClient } from '@/lib/plaid'
-import { syncItem } from '@/lib/sync'
+import { syncAll, syncItem } from '@/lib/sync'
 
 function createTestDb() {
   const sqlite = new Database(':memory:')
@@ -129,7 +129,7 @@ describe('syncItem', () => {
   })
 
   it('writes a snapshot row after sync', async () => {
-    const item = seedItem(db)
+    seedItem(db)
 
     mockedPlaid.accountsGet.mockResolvedValue({
       data: {
@@ -147,7 +147,7 @@ describe('syncItem', () => {
 
     mockedPlaid.investmentsHoldingsGet.mockRejectedValue(new Error('not supported'))
 
-    await syncItem(db, item)
+    await syncAll(db)
 
     const snaps = db.select().from(schema.snapshots).all()
     expect(snaps).toHaveLength(1)

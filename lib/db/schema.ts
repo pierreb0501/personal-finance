@@ -14,7 +14,7 @@ export const accounts = sqliteTable('accounts', {
   itemId: text('item_id')
     .notNull()
     .references(() => items.id),
-  plaidAccountId: text('plaid_account_id').notNull(),
+  plaidAccountId: text('plaid_account_id').notNull().unique(),
   name: text('name').notNull(),
   type: text('type').notNull(),
   subtype: text('subtype').notNull(),

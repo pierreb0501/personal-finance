@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `accounts_plaid_account_id_unique` ON `accounts` (`plaid_account_id`);
