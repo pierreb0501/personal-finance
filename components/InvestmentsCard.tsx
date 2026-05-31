@@ -1,16 +1,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { formatCAD } from '@/lib/format'
 
 type Holding = {
+  id: string
   securityName: string
   tickerSymbol: string | null
   quantity: number
   institutionValue: number
   accountName: string
-}
-
-function formatCAD(n: number) {
-  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n)
 }
 
 export function InvestmentsCard({ holdings }: { holdings: Holding[] }) {
@@ -29,12 +27,12 @@ export function InvestmentsCard({ holdings }: { holdings: Holding[] }) {
           ? <p className="text-muted-foreground text-sm">No data yet — click Sync</p>
           : (
             <ul className="space-y-2">
-              {holdings.map((h, i) => (
-                <li key={i} className="flex justify-between items-start text-sm">
+              {holdings.map((h) => (
+                <li key={h.id} className="flex justify-between items-start text-sm">
                   <div>
                     <p className="font-medium">{h.securityName}</p>
                     <p className="text-muted-foreground text-xs">
-                      {h.quantity} shares · {h.accountName}
+                      {h.quantity.toLocaleString('en-CA', { maximumFractionDigits: 4 })} shares · {h.accountName}
                       {h.tickerSymbol && <Badge variant="outline" className="ml-1 text-xs">{h.tickerSymbol}</Badge>}
                     </p>
                   </div>

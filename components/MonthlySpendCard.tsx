@@ -1,8 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-function formatCAD(n: number) {
-  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n)
-}
+import { formatCAD } from '@/lib/format'
 
 export function MonthlySpendCard({ total }: { total: number }) {
   const month = new Date().toLocaleString('en-CA', { month: 'long', year: 'numeric' })

@@ -1,10 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatCAD } from '@/lib/format'
 
 type Category = { category: string; total: number }
-
-function formatCAD(n: number) {
-  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n)
-}
 
 function formatCategory(raw: string) {
   return raw.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())

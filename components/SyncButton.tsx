@@ -10,9 +10,12 @@ export default function SyncButton() {
 
   const handleSync = async () => {
     setSyncing(true)
-    await fetch('/api/plaid/sync', { method: 'POST' })
-    setSyncing(false)
-    router.refresh()
+    try {
+      await fetch('/api/plaid/sync', { method: 'POST' })
+      router.refresh()
+    } finally {
+      setSyncing(false)
+    }
   }
 
   return (

@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatCAD } from '@/lib/format'
 
 type Snapshot = {
   date: string
@@ -8,10 +9,6 @@ type Snapshot = {
 type Props = {
   latest: Snapshot | null
   history: Snapshot[]
-}
-
-function formatCAD(n: number) {
-  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n)
 }
 
 export function NetWorthCard({ latest, history }: Props) {
