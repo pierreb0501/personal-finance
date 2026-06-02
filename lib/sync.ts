@@ -136,6 +136,35 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
   }
 }
 
+async function fetchUsdCadRate(): Promise<number> {
+  try {
+    const res = await fetch('https://api.frankfurter.app/latest?from=USD&to=CAD')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json() as { rates: { CAD: number } }
+    return data.rates.CAD
+  } catch {
+    return 1.38 // reasonable fallback if the API is unavailable
+  }
+}
+
+function resolveHoldingValue(
+  h: { institution_value: number | null; institution_price: number | null; quantity: number | null; iso_currency_code: string | null },
+  security: { close_price: number | null; iso_currency_code: string | null } | undefined,
+  usdCadRate: number,
+): number {
+  // Use institution-provided value first (already in account currency)
+  if (h.institution_value && h.institution_value > 0) return h.institution_value
+  if (h.institution_price && h.institution_price > 0) return h.institution_price * (h.quantity ?? 0)
+
+  // Fall back to security close_price × quantity, converting USD → CAD if needed
+  const closePrice = security?.close_price ?? 0
+  const qty = h.quantity ?? 0
+  const securityCurrency = security?.iso_currency_code ?? 'CAD'
+  const holdingCurrency = h.iso_currency_code ?? 'CAD'
+  const fxRate = securityCurrency === 'USD' && holdingCurrency === 'CAD' ? usdCadRate : 1
+  return closePrice * qty * fxRate
+}
+
 async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>) {
   const response = await plaidClient.investmentsHoldingsGet({
     access_token: item.accessToken,
@@ -146,9 +175,15 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   const securityMap = new Map(securities.map((s) => [s.security_id, s]))
   const ts = Math.floor(Date.now() / 1000)
 
+  // Fetch live USD/CAD rate once if any security is USD-priced against a CAD holding
+  const needsFx = holdings.some((h) => {
+    const sec = securityMap.get(h.security_id)
+    return sec?.iso_currency_code === 'USD' && (h.iso_currency_code ?? 'CAD') === 'CAD'
+  })
+  const usdCadRate = needsFx ? await fetchUsdCadRate() : 1
+
   db.transaction((tx) => {
     if (internalAccountIds.length > 0) {
-      // Delete holdings WHERE account_id IN (SELECT id FROM accounts WHERE item_id = ?)
       tx.delete(schema.holdings)
         .where(inArray(schema.holdings.accountId, internalAccountIds))
         .run()
@@ -166,11 +201,7 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
           securityName: security?.name ?? 'Unknown',
           tickerSymbol: security?.ticker_symbol ?? null,
           quantity: h.quantity,
-          institutionValue: (h.institution_value && h.institution_value > 0)
-            ? h.institution_value
-            : (h.institution_price && h.institution_price > 0)
-            ? h.institution_price * (h.quantity ?? 0)
-            : (security?.close_price ?? 0) * (h.quantity ?? 0),
+          institutionValue: resolveHoldingValue(h, security, usdCadRate),
           costBasis: h.cost_basis ?? null,
           updatedAt: ts,
         })
