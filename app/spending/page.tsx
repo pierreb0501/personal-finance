@@ -5,6 +5,7 @@ import {
   getTransactionsForMonth,
   getMerchantRules,
   getSetting,
+  getCategoryBudgets,
 } from '@/lib/db/queries'
 import { getCategoryColor } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -37,6 +38,8 @@ export default async function SpendingPage({
   const categories = getCategoryBreakdown(db, year, month)
   const transactions = getTransactionsForMonth(db, year, month)
   const rules = getMerchantRules(db)
+  const budgets = getCategoryBudgets(db)
+  const budgetMap = new Map(budgets.map((b) => [b.category, b.monthlyLimit]))
 
   const remaining = allowance - spend
   const spendRatio = allowance > 0 ? spend / allowance : 0
@@ -135,6 +138,7 @@ export default async function SpendingPage({
                   amount={cat.total}
                   share={maxCategoryTotal > 0 ? cat.total / maxCategoryTotal : 0}
                   color={getCategoryColor(cat.category)}
+                  limit={budgetMap.get(cat.category)}
                 />
               ))}
             </div>

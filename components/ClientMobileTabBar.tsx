@@ -2,12 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutGrid, TrendingUp, CreditCard, BarChart2 } from 'lucide-react'
+import { LayoutGrid, TrendingUp, CreditCard, BarChart2, Target } from 'lucide-react'
 
 const TABS = [
   { label: 'Overview',    href: '/',            icon: LayoutGrid },
-  { label: 'Net Worth',   href: '/net-worth',   icon: TrendingUp },
   { label: 'Spending',    href: '/spending',    icon: CreditCard },
+  { label: 'Budget',      href: '/budget',      icon: Target },
   { label: 'Invest',      href: '/investments', icon: BarChart2 },
 ]
 

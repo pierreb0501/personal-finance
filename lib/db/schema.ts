@@ -36,6 +36,7 @@ export const transactions = sqliteTable('transactions', {
   categoryDetailed: text('category_detailed').notNull(),
   pending: integer('pending').notNull(),
   customCategory: text('custom_category'),
+  ignored: integer('ignored').notNull().default(0),
 })
 
 export const holdings = sqliteTable('holdings', {
@@ -71,4 +72,9 @@ export const categoryRules = sqliteTable('category_rules', {
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+})
+
+export const categoryBudgets = sqliteTable('category_budgets', {
+  category: text('category').primaryKey(),
+  monthlyLimit: real('monthly_limit').notNull(),
 })

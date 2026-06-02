@@ -84,3 +84,7 @@ export function applyCategoryRules<
 }
 
 export const ALL_KNOWN_CATEGORIES = Object.keys(CATEGORY_LABELS)
+
+export function getAllKnownCategories(customCategories: string[] = []): string[] {
+  return [...new Set([...ALL_KNOWN_CATEGORIES, ...customCategories])]
+}

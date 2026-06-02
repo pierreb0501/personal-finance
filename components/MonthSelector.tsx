@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 type Props = {
   year: number
   month: number
+  basePath?: string
 }
 
 const MONTH_NAMES = [
@@ -13,7 +14,7 @@ const MONTH_NAMES = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]
 
-export function MonthSelector({ year, month }: Props) {
+export function MonthSelector({ year, month, basePath = '/spending' }: Props) {
   const router = useRouter()
   const now = new Date()
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
@@ -23,7 +24,7 @@ export function MonthSelector({ year, month }: Props) {
     let y = year
     if (m > 12) { m = 1; y++ }
     if (m < 1) { m = 12; y-- }
-    router.push(`/spending?year=${y}&month=${m}`)
+    router.push(`${basePath}?year=${y}&month=${m}`)
   }
 
   return (

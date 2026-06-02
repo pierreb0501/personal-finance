@@ -75,9 +75,10 @@ export function getMonthlySpend(db: DB, year?: number, month?: number): number {
     .where(
       and(
         gte(schema.transactions.date, start),
-        lt(schema.transactions.date, end + 'Z'), // include end date
+        sql`${schema.transactions.date} <= ${end}`,
         sql`${schema.transactions.amount} > 0`,
         eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
       ),
     )
     .get()
@@ -102,13 +103,13 @@ export function getCategoryBreakdown(db: DB, year?: number, month?: number) {
         sql`${schema.transactions.date} <= ${end}`,
         sql`${schema.transactions.amount} > 0`,
         eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
       ),
     )
     .groupBy(schema.transactions.category, schema.transactions.merchantName, schema.transactions.customCategory)
     .orderBy(desc(sql`SUM(${schema.transactions.amount})`))
     .all()
 
-  // Apply rules and re-aggregate by resolved category
   const applied = applyCategoryRules(rows.map(r => ({
     ...r,
     merchantName: r.merchantName ?? null,
@@ -135,6 +136,7 @@ export function getRecentTransactions(db: DB, limit = 20) {
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
+      ignored: schema.transactions.ignored,
     })
     .from(schema.transactions)
     .where(
@@ -166,6 +168,7 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
+      ignored: schema.transactions.ignored,
     })
     .from(schema.transactions)
     .where(
@@ -183,6 +186,13 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
     rows.map((r) => ({ ...r, merchantName: r.merchantName ?? null, customCategory: r.customCategory ?? null })),
     rules,
   )
+}
+
+export function setTransactionIgnored(db: DB, txId: string, ignored: boolean): void {
+  db.update(schema.transactions)
+    .set({ ignored: ignored ? 1 : 0 })
+    .where(eq(schema.transactions.id, txId))
+    .run()
 }
 
 // ─── Holdings ─────────────────────────────────────────────────────────────────
@@ -254,4 +264,22 @@ export function upsertSetting(db: DB, key: string, value: string): void {
     .values({ key, value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
     .run()
+}
+
+// ─── Category budgets ─────────────────────────────────────────────────────────
+
+export function getCategoryBudgets(db: DB): { category: string; monthlyLimit: number }[] {
+  return db.select().from(schema.categoryBudgets).all()
+}
+
+export function upsertCategoryBudget(db: DB, category: string, monthlyLimit: number): void {
+  db
+    .insert(schema.categoryBudgets)
+    .values({ category, monthlyLimit })
+    .onConflictDoUpdate({ target: schema.categoryBudgets.category, set: { monthlyLimit } })
+    .run()
+}
+
+export function deleteCategoryBudget(db: DB, category: string): void {
+  db.delete(schema.categoryBudgets).where(eq(schema.categoryBudgets.category, category)).run()
 }

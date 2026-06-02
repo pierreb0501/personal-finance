@@ -7,12 +7,14 @@ import {
   TrendingUp,
   CreditCard,
   BarChart2,
+  Target,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { label: 'Overview',    href: '/',            icon: LayoutGrid },
   { label: 'Net Worth',   href: '/net-worth',   icon: TrendingUp },
   { label: 'Spending',    href: '/spending',    icon: CreditCard },
+  { label: 'Budget',      href: '/budget',      icon: Target },
   { label: 'Investments', href: '/investments', icon: BarChart2 },
 ]
 
