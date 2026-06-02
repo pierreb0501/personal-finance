@@ -1,0 +1,106 @@
+import { db } from '@/lib/db'
+import { getAllHoldings, getAllSnapshotHistory, getLatestSnapshot } from '@/lib/db/queries'
+import { PALETTE } from '@/lib/categories'
+import { formatCAD } from '@/lib/format'
+import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
+import { DonutChart } from '@/components/DonutChart'
+import { HoldingRow } from '@/components/HoldingRow'
+import { EmptyState } from '@/components/EmptyState'
+import { BarChart2 } from 'lucide-react'
+
+export default function InvestmentsPage() {
+  const holdings = getAllHoldings(db)
+  const history = getAllSnapshotHistory(db)
+  const latest = getLatestSnapshot(db)
+
+  const totalPortfolioValue = holdings.reduce((s, h) => s + h.institutionValue, 0)
+
+  const allocationSegments = holdings.map((h, i) => ({
+    label: h.tickerSymbol ?? h.securityName,
+    value: h.institutionValue,
+    color: PALETTE[i % PALETTE.length],
+  }))
+
+  // Map history for investments_value
+  const investHistory = history.map((s) => ({
+    ...s,
+    netWorth: s.investmentsValue,
+    investmentsValue: s.investmentsValue,
+    totalAssets: s.totalAssets,
+    totalLiabilities: s.totalLiabilities,
+  }))
+
+  const investLatest = latest
+    ? { ...latest, netWorth: latest.investmentsValue }
+    : null
+
+  return (
+    <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
+      {/* Header */}
+      <div className="mb-7">
+        <h1 className="font-[family-name:var(--font-fraunces)] font-normal text-[30px] tracking-tight text-[var(--ink)]">
+          Investments
+        </h1>
+        <p className="text-[14px] text-[var(--muted-text)] mt-1">Portfolio overview</p>
+      </div>
+
+      {/* Hero + Allocation */}
+      <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
+        <NetWorthHeroCard
+          latest={investLatest}
+          history={investHistory}
+          color="#4A6B8A"
+          gradientId="invGrad"
+          valueKey="netWorth"
+          label="Portfolio value"
+        />
+
+        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+          <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
+            Allocation
+          </h3>
+          {holdings.length === 0 ? (
+            <EmptyState icon={BarChart2} message="No holdings found" subMessage="Connect an investment account to see allocation" />
+          ) : (
+            <DonutChart segments={allocationSegments} />
+          )}
+        </div>
+      </div>
+
+      {/* Holdings table */}
+      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
+          Holdings
+        </h3>
+        {holdings.length === 0 ? (
+          <EmptyState
+            icon={BarChart2}
+            message="No holdings yet"
+            subMessage="Sync an investment account to see your holdings here"
+          />
+        ) : (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                <th className="text-left text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Holding</th>
+                <th className="text-right text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Value</th>
+                <th className="text-right text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Weight</th>
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map((h) => (
+                <HoldingRow key={h.id} holding={h} totalPortfolioValue={totalPortfolioValue} />
+              ))}
+            </tbody>
+          </table>
+        )}
+        {holdings.length > 0 && (
+          <div className="flex justify-between pt-3 border-t border-[var(--hairline)] mt-1">
+            <span className="text-[13px] font-semibold text-[var(--muted-text)]">Total</span>
+            <span className="text-[13px] font-bold tabular-nums text-[var(--ink)]">{formatCAD(totalPortfolioValue)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { usePlaidLink } from 'react-plaid-link'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import Link from 'next/link'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { ArrowLeft, Loader2, Building2, Shield, Lock } from 'lucide-react'
 
 export default function ConnectPage() {
   const router = useRouter()
@@ -45,22 +47,73 @@ export default function ConnectPage() {
     [router],
   )
 
-  const { open, ready } = usePlaidLink({
-    token: linkToken,
-    onSuccess,
-  })
+  const { open, ready } = usePlaidLink({ token: linkToken, onSuccess })
 
   return (
-    <main className="flex min-h-screen items-center justify-center">
-      <div className="text-center space-y-4">
-        <h1 className="text-2xl font-semibold">Connect a bank account</h1>
-        <p className="text-muted-foreground">
-          Connect TD, Amex Canada, or Wealthsimple to get started.
-        </p>
-        {error && <p className="text-red-500 text-sm">{error}</p>}
-        <Button onClick={() => open()} disabled={!ready || loading}>
-          {loading ? 'Connecting…' : 'Connect a bank'}
-        </Button>
+    <main className="min-h-dvh bg-background flex flex-col">
+      <div className="max-w-5xl w-full mx-auto px-4 sm:px-6 py-8">
+        <Link
+          href="/"
+          className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+        >
+          <ArrowLeft size={14} />
+          Back
+        </Link>
+      </div>
+
+      <div className="flex-1 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-8">
+          {/* Icon */}
+          <div className="flex justify-center">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+              <Building2 size={24} className="text-primary" />
+            </div>
+          </div>
+
+          {/* Copy */}
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              Connect a bank account
+            </h1>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Link your bank, credit card, or investment account via Plaid. Read-only access — we never touch your money.
+            </p>
+          </div>
+
+          {/* Trust signals */}
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { icon: Shield, label: 'Read-only access' },
+              { icon: Lock, label: '256-bit encryption' },
+            ].map(({ icon: Icon, label }) => (
+              <div
+                key={label}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-secondary/50 border border-border/60"
+              >
+                <Icon size={13} className="text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground">{label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA */}
+          {error && (
+            <p className="text-sm text-red-400 text-center">{error}</p>
+          )}
+
+          <Button
+            className="w-full cursor-pointer gap-2"
+            onClick={() => open()}
+            disabled={!ready || loading}
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            {loading ? 'Connecting…' : 'Connect a bank'}
+          </Button>
+
+          {!ready && !error && (
+            <p className="text-center text-xs text-muted-foreground">Preparing secure connection…</p>
+          )}
+        </div>
       </div>
     </main>
   )
