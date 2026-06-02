@@ -166,7 +166,11 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
           securityName: security?.name ?? 'Unknown',
           tickerSymbol: security?.ticker_symbol ?? null,
           quantity: h.quantity,
-          institutionValue: h.institution_value ?? 0,
+          institutionValue: (h.institution_value && h.institution_value > 0)
+            ? h.institution_value
+            : (h.institution_price && h.institution_price > 0)
+            ? h.institution_price * (h.quantity ?? 0)
+            : (security?.close_price ?? 0) * (h.quantity ?? 0),
           costBasis: h.cost_basis ?? null,
           updatedAt: ts,
         })
