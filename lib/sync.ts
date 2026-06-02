@@ -182,6 +182,50 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   })
   const usdCadRate = needsFx ? await fetchUsdCadRate() : 1
 
+  // Fetch the authoritative account balances that were just synced from the institution.
+  // These are the exact values shown in Wealthsimple (or whichever institution).
+  // We will scale individual holding values so they sum exactly to this balance.
+  const accountBalances = new Map<string, number>()
+  for (const [plaidAccountId, internalId] of accountMap.entries()) {
+    const row = db
+      .select({ balanceCurrent: schema.accounts.balanceCurrent })
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, internalId))
+      .get()
+    if (row) accountBalances.set(plaidAccountId, row.balanceCurrent)
+  }
+
+  // Group holdings by Plaid account_id so we can scale per account
+  const holdingsByAccount = new Map<string, typeof holdings>()
+  for (const h of holdings) {
+    const bucket = holdingsByAccount.get(h.account_id) ?? []
+    bucket.push(h)
+    holdingsByAccount.set(h.account_id, bucket)
+  }
+
+  // Compute a price-based estimate for each holding (for relative weighting only),
+  // then scale each group so the sum equals the institution's reported account balance.
+  const scaledValueMap = new Map<typeof holdings[number], number>()
+
+  for (const [plaidAccountId, accountHoldings] of holdingsByAccount.entries()) {
+    const accountBalance = accountBalances.get(plaidAccountId) ?? 0
+
+    // Raw estimates — used only as proportional weights
+    const rawValues = accountHoldings.map((h) =>
+      resolveHoldingValue(h, securityMap.get(h.security_id), usdCadRate)
+    )
+    const rawTotal = rawValues.reduce((s, v) => s + v, 0)
+
+    accountHoldings.forEach((h, i) => {
+      // If the institution provided no balance or no price data, fall back to raw estimate
+      const scaled =
+        accountBalance > 0 && rawTotal > 0
+          ? (rawValues[i] / rawTotal) * accountBalance
+          : rawValues[i]
+      scaledValueMap.set(h, scaled)
+    })
+  }
+
   db.transaction((tx) => {
     if (internalAccountIds.length > 0) {
       tx.delete(schema.holdings)
@@ -201,7 +245,7 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
           securityName: security?.name ?? 'Unknown',
           tickerSymbol: security?.ticker_symbol ?? null,
           quantity: h.quantity,
-          institutionValue: resolveHoldingValue(h, security, usdCadRate),
+          institutionValue: scaledValueMap.get(h) ?? 0,
           costBasis: h.cost_basis ?? null,
           updatedAt: ts,
         })
@@ -222,14 +266,17 @@ function writeSnapshot(db: DB) {
     .from(schema.accounts)
     .get()
 
-  const holdingsTotals = db
-    .select({ total: sql<number>`COALESCE(SUM(institution_value), 0)` })
-    .from(schema.holdings)
+  // Use investment account balance_current directly — this is the exact value
+  // the institution reports, not a computed approximation from holdings.
+  const investmentsTotals = db
+    .select({ total: sql<number>`COALESCE(SUM(balance_current), 0)` })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.type, 'investment'))
     .get()
 
   const totalAssets = accountTotals?.assets ?? 0
   const totalLiabilities = accountTotals?.liabilities ?? 0
-  const investmentsValue = holdingsTotals?.total ?? 0
+  const investmentsValue = investmentsTotals?.total ?? 0
 
   db.insert(schema.snapshots)
     .values({
