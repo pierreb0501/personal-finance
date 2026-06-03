@@ -18,7 +18,7 @@ import { IncomeEditor } from '@/components/IncomeEditor'
 import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
 import { CategoryBar } from '@/components/CategoryBar'
-import { TransactionRow } from '@/components/TransactionRow'
+import { TransactionList } from '@/components/TransactionList'
 import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
@@ -215,19 +215,14 @@ export default async function SpendingPage({
       {/* Transactions table */}
       {transactions.length > 0 && (
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
-          <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-2">
+          <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
             Transactions
           </h3>
-          <div>
-            {transactions.map((tx) => (
-              <TransactionRow
-                key={tx.id}
-                tx={tx}
-                rules={rules}
-                knownCustomCategories={knownCustomCategories}
-              />
-            ))}
-          </div>
+          <TransactionList
+            transactions={transactions}
+            rules={rules}
+            knownCustomCategories={knownCustomCategories}
+          />
         </div>
       )}
     </div>
