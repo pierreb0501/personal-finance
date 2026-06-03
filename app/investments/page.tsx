@@ -14,6 +14,13 @@ export default function InvestmentsPage() {
   const latest = getLatestSnapshot(db)
 
   const totalPortfolioValue = holdings.reduce((s, h) => s + h.institutionValue, 0)
+  const totalCostBasis = holdings.reduce((s, h) => s + (h.costBasis ?? 0), 0)
+  const totalGain = totalCostBasis > 0
+    ? holdings.reduce((s, h) => s + (h.costBasis != null ? h.institutionValue - h.costBasis : 0), 0)
+    : null
+  const totalGainPct = totalGain !== null && totalCostBasis > 0
+    ? (totalGain / totalCostBasis) * 100
+    : null
 
   const allocationSegments = holdings.map((h, i) => ({
     label: h.tickerSymbol ?? h.securityName,
@@ -84,6 +91,7 @@ export default function InvestmentsPage() {
               <tr>
                 <th className="text-left text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Holding</th>
                 <th className="text-right text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Value</th>
+                <th className="text-right text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Gain / Loss</th>
                 <th className="text-right text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--faint)] pb-3">Weight</th>
               </tr>
             </thead>
@@ -97,7 +105,22 @@ export default function InvestmentsPage() {
         {holdings.length > 0 && (
           <div className="flex justify-between pt-3 border-t border-[var(--hairline)] mt-1">
             <span className="text-[13px] font-semibold text-[var(--muted-text)]">Total</span>
-            <span className="text-[13px] font-bold tabular-nums text-[var(--ink)]">{formatCAD(totalPortfolioValue)}</span>
+            <div className="flex items-center gap-6">
+              {totalGain !== null && (
+                <span className={[
+                  'text-[13px] font-semibold tabular-nums',
+                  totalGain >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
+                ].join(' ')}>
+                  {totalGain >= 0 ? '+' : ''}{formatCAD(totalGain)}
+                  {totalGainPct !== null && (
+                    <span className="ml-1 opacity-75 font-normal">
+                      ({totalGainPct >= 0 ? '+' : ''}{totalGainPct.toFixed(1)}%)
+                    </span>
+                  )}
+                </span>
+              )}
+              <span className="text-[13px] font-bold tabular-nums text-[var(--ink)]">{formatCAD(totalPortfolioValue)}</span>
+            </div>
           </div>
         )}
       </div>
