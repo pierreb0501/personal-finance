@@ -382,6 +382,66 @@ export function seedBudgetFromPrevious(db: DB, year: number, month: number): voi
 
 // ─── Custom categories ────────────────────────────────────────────────────────
 
+export function getRecurringMerchants(db: DB) {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+  const rangeStart = localDateString(start)
+
+  const rules = getMerchantRules(db)
+
+  const rows = db
+    .select({
+      merchantName: schema.transactions.merchantName,
+      category: schema.transactions.category,
+      customCategory: schema.transactions.customCategory,
+      monthKey: sql<string>`strftime('%Y-%m', ${schema.transactions.date})`,
+      avgAmount: sql<number>`AVG(${schema.transactions.amount})`,
+    })
+    .from(schema.transactions)
+    .where(
+      and(
+        gte(schema.transactions.date, rangeStart),
+        sql`${schema.transactions.amount} > 0`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+        sql`${schema.transactions.merchantName} IS NOT NULL`,
+      )
+    )
+    .groupBy(
+      schema.transactions.merchantName,
+      sql`strftime('%Y-%m', ${schema.transactions.date})`,
+      schema.transactions.category,
+      schema.transactions.customCategory,
+    )
+    .all()
+
+  const applied = applyCategoryRules(
+    rows.map(r => ({ ...r, merchantName: r.merchantName ?? null, customCategory: r.customCategory ?? null })),
+    rules,
+  )
+
+  const merchantMap = new Map<string, { months: Set<string>; amounts: number[]; category: string }>()
+  for (const row of applied) {
+    if (!row.merchantName) continue
+    if (!merchantMap.has(row.merchantName)) {
+      merchantMap.set(row.merchantName, { months: new Set(), amounts: [], category: row.category })
+    }
+    const entry = merchantMap.get(row.merchantName)!
+    entry.months.add(row.monthKey)
+    entry.amounts.push(row.avgAmount)
+  }
+
+  return Array.from(merchantMap.entries())
+    .filter(([, v]) => v.months.size >= 2)
+    .map(([merchantName, v]) => ({
+      merchantName,
+      category: v.category,
+      avgAmount: v.amounts.reduce((s, a) => s + a, 0) / v.amounts.length,
+      monthCount: v.months.size,
+    }))
+    .sort((a, b) => b.avgAmount - a.avgAmount)
+}
+
 export function getCategoryTrendMonths(db: DB, count = 6) {
   const now = new Date()
   // First day of the earliest month we want

@@ -8,6 +8,7 @@ import {
   getCategoryBudgets,
   getCustomCategories,
   getCategoryTrendMonths,
+  getRecurringMerchants,
 } from '@/lib/db/queries'
 import { getCategoryColor } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -21,6 +22,7 @@ import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
+import { RecurringCard } from '@/components/RecurringCard'
 import { Receipt } from 'lucide-react'
 
 const MONTH_NAMES = [
@@ -61,6 +63,7 @@ export default async function SpendingPage({
   const maxCategoryTotal = categories[0]?.total ?? 0
 
   const trendMonths = getCategoryTrendMonths(db, 6)
+  const recurringMerchants = getRecurringMerchants(db)
   const customCats = getCustomCategories(db)
   const knownCustomCategories = [...new Set([
     ...rules.map((r) => r.category),
@@ -198,6 +201,9 @@ export default async function SpendingPage({
         <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by category</p>
         <SpendingTrendChart months={trendMonths} />
       </div>
+
+      {/* Recurring charges */}
+      <RecurringCard merchants={recurringMerchants} />
 
       {/* Unlabeled transfers alert */}
       <TransferAlert
