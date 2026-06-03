@@ -389,7 +389,11 @@ export function getRecurringMerchants(db: DB) {
 
   const rules = getMerchantRules(db)
 
-  // Fetch one row per transaction so we have day-of-month granularity
+  const dismissed = new Set(
+    db.select().from(schema.dismissedRecurring).all().map(r => r.merchantName)
+  )
+  const manual = db.select().from(schema.manualRecurring).all()
+
   const rows = db
     .select({
       merchantName: schema.transactions.merchantName,
@@ -416,7 +420,6 @@ export function getRecurringMerchants(db: DB) {
     rules,
   )
 
-  // Group: merchant -> month -> { days, amounts }
   type MonthEntry = { days: number[]; amounts: number[] }
   const merchantMap = new Map<string, { months: Map<string, MonthEntry>; category: string }>()
 
@@ -440,13 +443,17 @@ export function getRecurringMerchants(db: DB) {
     avgAmount: number
     monthCount: number
     dayOfMonth: number
+    isManual: boolean
   }[] = []
 
   for (const [merchantName, data] of merchantMap.entries()) {
+    if (dismissed.has(merchantName)) continue
+    // Skip if already covered by a manual entry
+    if (manual.some(m => m.merchantName === merchantName)) continue
+
     const monthEntries = Array.from(data.months.values())
     if (monthEntries.length < 2) continue
 
-    // Find the anchor day (from any month) that matches within ±2 in the most months
     let bestDay = 0
     let bestCount = 0
 
@@ -464,24 +471,47 @@ export function getRecurringMerchants(db: DB) {
 
     if (bestCount < 2) continue
 
-    // Average amount across all matching transactions
     const matchingAmounts = monthEntries
       .filter(m => m.days.some(d => Math.abs(d - bestDay) <= 2))
-      .flatMap((m, _, arr) =>
-        m.amounts.filter((_, i) => Math.abs(m.days[i] - bestDay) <= 2)
-      )
+      .flatMap(m => m.amounts.filter((_, i) => Math.abs(m.days[i] - bestDay) <= 2))
     const avgAmount = matchingAmounts.reduce((s, a) => s + a, 0) / matchingAmounts.length
 
+    result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false })
+  }
+
+  // Merge manual entries (never dismissed)
+  for (const m of manual) {
     result.push({
-      merchantName,
-      category: data.category,
-      avgAmount,
-      monthCount: bestCount,
-      dayOfMonth: bestDay,
+      merchantName: m.merchantName,
+      category: m.category,
+      avgAmount: m.avgAmount,
+      monthCount: 0,
+      dayOfMonth: m.dayOfMonth,
+      isManual: true,
     })
   }
 
   return result.sort((a, b) => b.avgAmount - a.avgAmount)
+}
+
+export function dismissRecurringMerchant(db: DB, merchantName: string): void {
+  db.insert(schema.dismissedRecurring).values({ merchantName }).onConflictDoNothing().run()
+}
+
+export function addManualRecurring(db: DB, merchantName: string, dayOfMonth: number, avgAmount: number, category: string): void {
+  const id = `manual_rec_${Date.now()}`
+  db
+    .insert(schema.manualRecurring)
+    .values({ id, merchantName, dayOfMonth, avgAmount, category, createdAt: Math.floor(Date.now() / 1000) })
+    .onConflictDoUpdate({
+      target: schema.manualRecurring.merchantName,
+      set: { dayOfMonth, avgAmount, category },
+    })
+    .run()
+}
+
+export function deleteManualRecurring(db: DB, merchantName: string): void {
+  db.delete(schema.manualRecurring).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
 }
 
 export function getCategoryTrendMonths(db: DB, count = 6) {

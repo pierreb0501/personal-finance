@@ -272,7 +272,7 @@ export default async function SpendingPage({
       )}
 
       {/* Recurring charges — below transactions */}
-      <RecurringCard merchants={recurringMerchants} />
+      <RecurringCard merchants={recurringMerchants} knownCustomCategories={knownCustomCategories} />
     </div>
   )
 }

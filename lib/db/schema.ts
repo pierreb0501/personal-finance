@@ -81,3 +81,23 @@ export const categoryBudgets = sqliteTable('category_budgets', {
   month: integer('month').notNull(),
   planned: real('planned').notNull(),
 })
+
+export const customCategories = sqliteTable('custom_categories', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  color: text('color'),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const manualRecurring = sqliteTable('manual_recurring', {
+  id: text('id').primaryKey(),
+  merchantName: text('merchant_name').notNull().unique(),
+  dayOfMonth: integer('day_of_month').notNull(),
+  avgAmount: real('avg_amount').notNull(),
+  category: text('category').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const dismissedRecurring = sqliteTable('dismissed_recurring', {
+  merchantName: text('merchant_name').primaryKey(),
+})
