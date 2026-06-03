@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { TransactionRow } from '@/components/TransactionRow'
 import { Search } from 'lucide-react'
+import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import type { CategoryRule } from '@/lib/categories'
 
 type Transaction = {
@@ -20,22 +21,39 @@ type Props = {
   transactions: Transaction[]
   rules: CategoryRule[]
   knownCustomCategories: string[]
+  recurringMerchantNames?: Set<string>
 }
 
-export function TransactionList({ transactions, rules, knownCustomCategories }: Props) {
+export function TransactionList({ transactions, rules, knownCustomCategories, recurringMerchantNames }: Props) {
   const [query, setQuery] = useState('')
+  const [activeCategory, setActiveCategory] = useState<string | null>(null)
+
+  const categories = useMemo(() => {
+    const seen = new Map<string, number>()
+    for (const tx of transactions) {
+      const cat = tx.category
+      seen.set(cat, (seen.get(cat) ?? 0) + 1)
+    }
+    return Array.from(seen.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([cat]) => cat)
+  }, [transactions])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return transactions
-    return transactions.filter(
-      (tx) => tx.merchantName?.toLowerCase().includes(q)
-    )
-  }, [transactions, query])
+    return transactions.filter((tx) => {
+      const matchesQuery = !q || tx.merchantName?.toLowerCase().includes(q)
+      const matchesCategory = !activeCategory || tx.category === activeCategory
+      return matchesQuery && matchesCategory
+    })
+  }, [transactions, query, activeCategory])
+
+  const isFiltered = query.trim() || activeCategory
 
   return (
     <div>
-      <div className="relative mb-4">
+      {/* Search */}
+      <div className="relative mb-3">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--faint)]" />
         <input
           type="text"
@@ -46,8 +64,34 @@ export function TransactionList({ transactions, rules, knownCustomCategories }: 
         />
       </div>
 
+      {/* Category chips */}
+      {categories.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {categories.map((cat) => {
+            const active = activeCategory === cat
+            const color = getCategoryColor(cat)
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(active ? null : cat)}
+                className={[
+                  'px-2.5 py-1 rounded-full text-[12px] font-medium transition-colors border',
+                  active
+                    ? 'text-white border-transparent'
+                    : 'bg-white text-[var(--muted-text)] border-[var(--hairline)] hover:border-current',
+                ].join(' ')}
+                style={active ? { background: color, borderColor: color } : { '--hover-color': color } as React.CSSProperties}
+              >
+                {getCategoryLabel(cat)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Results */}
       {filtered.length === 0 ? (
-        <p className="text-[13px] text-[var(--faint)] text-center py-6">No transactions match &ldquo;{query}&rdquo;</p>
+        <p className="text-[13px] text-[var(--faint)] text-center py-6">No transactions match the current filters</p>
       ) : (
         <div>
           {filtered.map((tx) => (
@@ -56,9 +100,10 @@ export function TransactionList({ transactions, rules, knownCustomCategories }: 
               tx={tx}
               rules={rules}
               knownCustomCategories={knownCustomCategories}
+              isRecurring={tx.merchantName ? recurringMerchantNames?.has(tx.merchantName) : false}
             />
           ))}
-          {query && filtered.length < transactions.length && (
+          {isFiltered && filtered.length < transactions.length && (
             <p className="text-[12px] text-[var(--faint)] text-center pt-3">
               Showing {filtered.length} of {transactions.length} transactions
             </p>

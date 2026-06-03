@@ -7,10 +7,17 @@ type RecurringMerchant = {
   category: string
   avgAmount: number
   monthCount: number
+  dayOfMonth: number
 }
 
 type Props = {
   merchants: RecurringMerchant[]
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0])
 }
 
 export function RecurringCard({ merchants }: Props) {
@@ -19,14 +26,14 @@ export function RecurringCard({ merchants }: Props) {
   const monthlyTotal = merchants.reduce((s, m) => s + m.avgAmount, 0)
 
   return (
-    <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+    <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mt-[18px]">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
             Recurring charges
           </h3>
           <p className="text-[13px] text-[var(--muted-text)] mt-0.5">
-            Detected in 2+ of the last 3 months
+            Same day each month (±2 days)
           </p>
         </div>
         <div className="text-right">
@@ -49,7 +56,7 @@ export function RecurringCard({ merchants }: Props) {
             </div>
             <div className="text-right shrink-0 ml-4">
               <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">~{formatCAD(m.avgAmount)}</p>
-              <p className="text-[11px] text-[var(--faint)]">{m.monthCount}× last 3 mo</p>
+              <p className="text-[11px] text-[var(--faint)]">~{ordinal(m.dayOfMonth)} of each month</p>
             </div>
           </div>
         ))}

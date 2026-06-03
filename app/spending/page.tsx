@@ -249,9 +249,6 @@ export default async function SpendingPage({
         <SpendingTrendChart months={trendMonths} />
       </div>
 
-      {/* Recurring charges */}
-      <RecurringCard merchants={recurringMerchants} />
-
       {/* Unlabeled transfers alert */}
       <TransferAlert
         transfers={unlabeledTransfers}
@@ -269,9 +266,13 @@ export default async function SpendingPage({
             transactions={transactions}
             rules={rules}
             knownCustomCategories={knownCustomCategories}
+            recurringMerchantNames={new Set(recurringMerchants.map((m) => m.merchantName))}
           />
         </div>
       )}
+
+      {/* Recurring charges — below transactions */}
+      <RecurringCard merchants={recurringMerchants} />
     </div>
   )
 }

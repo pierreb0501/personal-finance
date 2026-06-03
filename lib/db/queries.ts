@@ -389,13 +389,15 @@ export function getRecurringMerchants(db: DB) {
 
   const rules = getMerchantRules(db)
 
+  // Fetch one row per transaction so we have day-of-month granularity
   const rows = db
     .select({
       merchantName: schema.transactions.merchantName,
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
       monthKey: sql<string>`strftime('%Y-%m', ${schema.transactions.date})`,
-      avgAmount: sql<number>`AVG(${schema.transactions.amount})`,
+      dayOfMonth: sql<number>`CAST(strftime('%d', ${schema.transactions.date}) AS INTEGER)`,
+      amount: schema.transactions.amount,
     })
     .from(schema.transactions)
     .where(
@@ -407,12 +409,6 @@ export function getRecurringMerchants(db: DB) {
         sql`${schema.transactions.merchantName} IS NOT NULL`,
       )
     )
-    .groupBy(
-      schema.transactions.merchantName,
-      sql`strftime('%Y-%m', ${schema.transactions.date})`,
-      schema.transactions.category,
-      schema.transactions.customCategory,
-    )
     .all()
 
   const applied = applyCategoryRules(
@@ -420,26 +416,72 @@ export function getRecurringMerchants(db: DB) {
     rules,
   )
 
-  const merchantMap = new Map<string, { months: Set<string>; amounts: number[]; category: string }>()
+  // Group: merchant -> month -> { days, amounts }
+  type MonthEntry = { days: number[]; amounts: number[] }
+  const merchantMap = new Map<string, { months: Map<string, MonthEntry>; category: string }>()
+
   for (const row of applied) {
     if (!row.merchantName) continue
     if (!merchantMap.has(row.merchantName)) {
-      merchantMap.set(row.merchantName, { months: new Set(), amounts: [], category: row.category })
+      merchantMap.set(row.merchantName, { months: new Map(), category: row.category })
     }
     const entry = merchantMap.get(row.merchantName)!
-    entry.months.add(row.monthKey)
-    entry.amounts.push(row.avgAmount)
+    if (!entry.months.has(row.monthKey)) {
+      entry.months.set(row.monthKey, { days: [], amounts: [] })
+    }
+    const m = entry.months.get(row.monthKey)!
+    m.days.push(row.dayOfMonth)
+    m.amounts.push(row.amount)
   }
 
-  return Array.from(merchantMap.entries())
-    .filter(([, v]) => v.months.size >= 2)
-    .map(([merchantName, v]) => ({
+  const result: {
+    merchantName: string
+    category: string
+    avgAmount: number
+    monthCount: number
+    dayOfMonth: number
+  }[] = []
+
+  for (const [merchantName, data] of merchantMap.entries()) {
+    const monthEntries = Array.from(data.months.values())
+    if (monthEntries.length < 2) continue
+
+    // Find the anchor day (from any month) that matches within ±2 in the most months
+    let bestDay = 0
+    let bestCount = 0
+
+    for (const monthA of monthEntries) {
+      for (const dayA of monthA.days) {
+        const matchCount = monthEntries.filter(m =>
+          m.days.some(d => Math.abs(d - dayA) <= 2)
+        ).length
+        if (matchCount > bestCount) {
+          bestCount = matchCount
+          bestDay = dayA
+        }
+      }
+    }
+
+    if (bestCount < 2) continue
+
+    // Average amount across all matching transactions
+    const matchingAmounts = monthEntries
+      .filter(m => m.days.some(d => Math.abs(d - bestDay) <= 2))
+      .flatMap((m, _, arr) =>
+        m.amounts.filter((_, i) => Math.abs(m.days[i] - bestDay) <= 2)
+      )
+    const avgAmount = matchingAmounts.reduce((s, a) => s + a, 0) / matchingAmounts.length
+
+    result.push({
       merchantName,
-      category: v.category,
-      avgAmount: v.amounts.reduce((s, a) => s + a, 0) / v.amounts.length,
-      monthCount: v.months.size,
-    }))
-    .sort((a, b) => b.avgAmount - a.avgAmount)
+      category: data.category,
+      avgAmount,
+      monthCount: bestCount,
+      dayOfMonth: bestDay,
+    })
+  }
+
+  return result.sort((a, b) => b.avgAmount - a.avgAmount)
 }
 
 export function getCategoryTrendMonths(db: DB, count = 6) {
