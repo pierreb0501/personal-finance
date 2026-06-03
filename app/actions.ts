@@ -46,14 +46,14 @@ export async function toggleIgnoreTransaction(txId: string, ignored: boolean): P
   revalidatePath('/budget')
 }
 
-export async function saveCategoryBudget(category: string, monthlyLimit: number): Promise<void> {
-  upsertCategoryBudget(db, category, monthlyLimit)
+export async function saveCategoryBudget(category: string, year: number, month: number, planned: number): Promise<void> {
+  upsertCategoryBudget(db, category, year, month, planned)
   revalidatePath('/budget')
   revalidatePath('/spending')
 }
 
-export async function deleteCategoryBudget(category: string): Promise<void> {
-  dbDeleteCategoryBudget(db, category)
+export async function deleteCategoryBudget(category: string, year: number, month: number): Promise<void> {
+  dbDeleteCategoryBudget(db, category, year, month)
   revalidatePath('/budget')
   revalidatePath('/spending')
 }

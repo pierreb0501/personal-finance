@@ -266,20 +266,41 @@ export function upsertSetting(db: DB, key: string, value: string): void {
     .run()
 }
 
-// ─── Category budgets ─────────────────────────────────────────────────────────
+// ─── Category budgets (per-month planner) ────────────────────────────────────
 
-export function getCategoryBudgets(db: DB): { category: string; monthlyLimit: number }[] {
-  return db.select().from(schema.categoryBudgets).all()
+export function getCategoryBudgets(db: DB, year: number, month: number) {
+  return db
+    .select()
+    .from(schema.categoryBudgets)
+    .where(
+      and(
+        eq(schema.categoryBudgets.year, year),
+        eq(schema.categoryBudgets.month, month),
+      )
+    )
+    .all()
 }
 
-export function upsertCategoryBudget(db: DB, category: string, monthlyLimit: number): void {
+export function upsertCategoryBudget(db: DB, category: string, year: number, month: number, planned: number): void {
   db
     .insert(schema.categoryBudgets)
-    .values({ category, monthlyLimit })
-    .onConflictDoUpdate({ target: schema.categoryBudgets.category, set: { monthlyLimit } })
+    .values({ id: `${category}_${year}_${month}`, category, year, month, planned })
+    .onConflictDoUpdate({
+      target: schema.categoryBudgets.id,
+      set: { planned },
+    })
     .run()
 }
 
-export function deleteCategoryBudget(db: DB, category: string): void {
-  db.delete(schema.categoryBudgets).where(eq(schema.categoryBudgets.category, category)).run()
+export function deleteCategoryBudget(db: DB, category: string, year: number, month: number): void {
+  db
+    .delete(schema.categoryBudgets)
+    .where(
+      and(
+        eq(schema.categoryBudgets.category, category),
+        eq(schema.categoryBudgets.year, year),
+        eq(schema.categoryBudgets.month, month),
+      )
+    )
+    .run()
 }

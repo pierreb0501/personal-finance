@@ -38,8 +38,8 @@ export default async function SpendingPage({
   const categories = getCategoryBreakdown(db, year, month)
   const transactions = getTransactionsForMonth(db, year, month)
   const rules = getMerchantRules(db)
-  const budgets = getCategoryBudgets(db)
-  const budgetMap = new Map(budgets.map((b) => [b.category, b.monthlyLimit]))
+  const budgets = getCategoryBudgets(db, year, month)
+  const budgetMap = new Map(budgets.map((b) => [b.category, b.planned]))
 
   const remaining = allowance - spend
   const spendRatio = allowance > 0 ? spend / allowance : 0

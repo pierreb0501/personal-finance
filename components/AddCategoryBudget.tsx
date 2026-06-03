@@ -1,28 +1,33 @@
 'use client'
 
 import { useState } from 'react'
-import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
+import { getCategoryLabel } from '@/lib/categories'
 import { saveCategoryBudget } from '@/app/actions'
 import { Plus } from 'lucide-react'
 
-export function AddCategoryBudget({ categories }: { categories: string[] }) {
+type Props = {
+  categories: string[]
+  year: number
+  month: number
+}
+
+export function AddCategoryBudget({ categories, year, month }: Props) {
   const [selected, setSelected] = useState('')
-  const [limit, setLimit] = useState('')
+  const [planned, setPlanned] = useState('')
   const [saving, setSaving] = useState(false)
 
   async function handleAdd() {
-    const parsed = parseFloat(limit.replace(/[^0-9.]/g, ''))
+    const parsed = parseFloat(planned.replace(/[^0-9.]/g, ''))
     if (!selected || isNaN(parsed) || parsed <= 0) return
     setSaving(true)
-    await saveCategoryBudget(selected, parsed)
+    await saveCategoryBudget(selected, year, month, parsed)
     setSelected('')
-    setLimit('')
+    setPlanned('')
     setSaving(false)
   }
 
   return (
     <div className="flex items-end gap-3 flex-wrap">
-      {/* Category picker */}
       <div className="flex-1 min-w-[180px]">
         <label className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] block mb-1.5">
           Category
@@ -39,15 +44,14 @@ export function AddCategoryBudget({ categories }: { categories: string[] }) {
         </select>
       </div>
 
-      {/* Limit input */}
-      <div className="w-36">
+      <div className="w-40">
         <label className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] block mb-1.5">
-          Monthly limit ($)
+          Planned amount ($)
         </label>
         <input
           type="number"
-          value={limit}
-          onChange={(e) => setLimit(e.target.value)}
+          value={planned}
+          onChange={(e) => setPlanned(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
           placeholder="e.g. 500"
           min={0}
@@ -55,14 +59,13 @@ export function AddCategoryBudget({ categories }: { categories: string[] }) {
         />
       </div>
 
-      {/* Add button */}
       <button
         onClick={handleAdd}
-        disabled={!selected || !limit || saving}
+        disabled={!selected || !planned || saving}
         className="flex items-center gap-1.5 px-4 py-2.5 bg-[var(--accent-dark)] text-white text-[14px] font-semibold rounded-[10px] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         <Plus size={14} />
-        Add limit
+        Add to plan
       </button>
     </div>
   )

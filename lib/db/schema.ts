@@ -75,6 +75,9 @@ export const settings = sqliteTable('settings', {
 })
 
 export const categoryBudgets = sqliteTable('category_budgets', {
-  category: text('category').primaryKey(),
-  monthlyLimit: real('monthly_limit').notNull(),
+  id: text('id').primaryKey(),
+  category: text('category').notNull(),
+  year: integer('year').notNull(),
+  month: integer('month').notNull(),
+  planned: real('planned').notNull(),
 })
