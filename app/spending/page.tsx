@@ -54,6 +54,18 @@ export default async function SpendingPage({
   const savings = income > 0 ? income - spend : null
   const savingsRate = income > 0 ? ((income - spend) / income) * 100 : null
 
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
+  const dayOfMonth = now.getDate()
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const projectedSpend = isCurrentMonth && dayOfMonth > 0
+    ? (spend / dayOfMonth) * daysInMonth
+    : null
+  const projectedRemaining = projectedSpend !== null ? allowance - projectedSpend : null
+  const projectedSavings = projectedSpend !== null && income > 0 ? income - projectedSpend : null
+  const projectedSavingsRate = projectedSavings !== null && income > 0
+    ? (projectedSavings / income) * 100
+    : null
+
   const donutSegments = categories.map((c, i) => ({
     label: c.category,
     value: c.total,
@@ -153,6 +165,41 @@ export default async function SpendingPage({
         </div>
         <ProgressBar value={spendRatio} />
       </div>
+
+      {/* Month-end predictor */}
+      {projectedSpend !== null && (
+        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Month-end forecast</p>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
+                {formatCAD(projectedSpend)}
+              </p>
+              <p className="text-[13px] text-[var(--muted-text)] mt-1">
+                projected by end of month · day {dayOfMonth}/{daysInMonth}
+              </p>
+            </div>
+            <div className="text-right">
+              {projectedRemaining !== null && (
+                <div className={[
+                  'inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1 rounded-full',
+                  projectedRemaining >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
+                ].join(' ')}>
+                  {projectedRemaining >= 0 ? '▲' : '▼'}{' '}
+                  {projectedRemaining >= 0
+                    ? `${formatCAD(projectedRemaining)} under`
+                    : `${formatCAD(Math.abs(projectedRemaining))} over`}
+                </div>
+              )}
+              {projectedSavingsRate !== null && (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1.5">
+                  {projectedSavingsRate >= 0 ? '+' : ''}{projectedSavingsRate.toFixed(1)}% projected savings rate
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Category breakdown */}
       {categories.length === 0 ? (
