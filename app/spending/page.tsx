@@ -6,16 +6,21 @@ import {
   getMerchantRules,
   getSetting,
   getCategoryBudgets,
+  getCustomCategories,
+  getCategoryTrendMonths,
 } from '@/lib/db/queries'
 import { getCategoryColor } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
+import { IncomeEditor } from '@/components/IncomeEditor'
 import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
 import { CategoryBar } from '@/components/CategoryBar'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
+import { TransferAlert } from '@/components/TransferAlert'
+import { SpendingTrendChart } from '@/components/SpendingTrendChart'
 import { Receipt } from 'lucide-react'
 
 const MONTH_NAMES = [
@@ -35,6 +40,7 @@ export default async function SpendingPage({
 
   const spend = getMonthlySpend(db, year, month)
   const allowance = Number(getSetting(db, 'allowance') ?? '3000')
+  const income = Number(getSetting(db, 'income') ?? '0')
   const categories = getCategoryBreakdown(db, year, month)
   const transactions = getTransactionsForMonth(db, year, month)
   const rules = getMerchantRules(db)
@@ -43,6 +49,8 @@ export default async function SpendingPage({
 
   const remaining = allowance - spend
   const spendRatio = allowance > 0 ? spend / allowance : 0
+  const savings = income > 0 ? income - spend : null
+  const savingsRate = income > 0 ? ((income - spend) / income) * 100 : null
 
   const donutSegments = categories.map((c, i) => ({
     label: c.category,
@@ -52,7 +60,17 @@ export default async function SpendingPage({
 
   const maxCategoryTotal = categories[0]?.total ?? 0
 
-  const knownCustomCategories = [...new Set(rules.map((r) => r.category))]
+  const trendMonths = getCategoryTrendMonths(db, 6)
+  const customCats = getCustomCategories(db)
+  const knownCustomCategories = [...new Set([
+    ...rules.map((r) => r.category),
+    ...customCats.map((c) => c.name),
+  ])]
+
+  // Unlabeled transfers: category is still TRANSFER_IN or TRANSFER_OUT (meaning no customCategory applied)
+  const unlabeledTransfers = transactions.filter(
+    (tx) => (tx.category === 'TRANSFER_IN' || tx.category === 'TRANSFER_OUT') && !tx.ignored
+  )
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -70,7 +88,7 @@ export default async function SpendingPage({
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-[18px] mb-[18px]">
+      <div className="grid grid-cols-4 gap-[18px] mb-[18px]">
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
@@ -79,20 +97,46 @@ export default async function SpendingPage({
         </div>
 
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Income</p>
+          <IncomeEditor income={income} />
+        </div>
+
+        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Allowance</p>
           <AllowanceEditor allowance={allowance} />
         </div>
 
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Remaining</p>
-          <p
-            className={[
-              'font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2',
-              remaining >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
-            ].join(' ')}
-          >
-            {remaining >= 0 ? formatCAD(remaining) : `-${formatCAD(Math.abs(remaining))}`}
-          </p>
+          {savings !== null ? (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Saved</p>
+              <p
+                className={[
+                  'font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2',
+                  savings >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
+                ].join(' ')}
+              >
+                {savings >= 0 ? formatCAD(savings) : `-${formatCAD(Math.abs(savings))}`}
+              </p>
+              {savingsRate !== null && (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1">
+                  {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Remaining</p>
+              <p
+                className={[
+                  'font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2',
+                  remaining >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
+                ].join(' ')}
+              >
+                {remaining >= 0 ? formatCAD(remaining) : `-${formatCAD(Math.abs(remaining))}`}
+              </p>
+            </>
+          )}
         </div>
       </div>
 
@@ -145,6 +189,22 @@ export default async function SpendingPage({
           </div>
         </div>
       )}
+
+      {/* 6-month trend */}
+      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+        <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
+          Spending trend
+        </h3>
+        <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by category</p>
+        <SpendingTrendChart months={trendMonths} />
+      </div>
+
+      {/* Unlabeled transfers alert */}
+      <TransferAlert
+        transfers={unlabeledTransfers}
+        rules={rules}
+        knownCustomCategories={knownCustomCategories}
+      />
 
       {/* Transactions table */}
       {transactions.length > 0 && (
