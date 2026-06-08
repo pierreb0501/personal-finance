@@ -9,8 +9,9 @@ import {
   getCustomCategories,
   getCategoryTrendMonths,
   getRecurringMerchants,
+  getCommittedItemsWithStatus,
 } from '@/lib/db/queries'
-import { getCategoryColor } from '@/lib/categories'
+import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
@@ -23,6 +24,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
 import { RecurringCard } from '@/components/RecurringCard'
+import { CommittedCard } from '@/components/CommittedCard'
 import { Receipt } from 'lucide-react'
 
 const MONTH_NAMES = [
@@ -66,16 +68,20 @@ export default async function SpendingPage({
     ? (projectedSavings / income) * 100
     : null
 
-  const donutSegments = categories.map((c, i) => ({
-    label: c.category,
-    value: c.total,
-    color: getCategoryColor(c.category),
-  }))
+  // Exclude negative-total categories (credits/refunds) — a negative dashLen breaks SVG rendering
+  const donutSegments = categories
+    .filter((c) => c.total > 0)
+    .map((c) => ({
+      label: getCategoryLabel(c.category),
+      value: c.total,
+      color: getCategoryColor(c.category),
+    }))
 
   const maxCategoryTotal = categories[0]?.total ?? 0
 
   const trendMonths = getCategoryTrendMonths(db, 6)
   const recurringMerchants = getRecurringMerchants(db)
+  const committedItems = getCommittedItemsWithStatus(db, year, month)
   const customCats = getCustomCategories(db)
   const knownCustomCategories = [...new Set([
     ...rules.map((r) => r.category),
@@ -270,6 +276,9 @@ export default async function SpendingPage({
           />
         </div>
       )}
+
+      {/* Monthly Commitments */}
+      <CommittedCard items={committedItems} knownCustomCategories={knownCustomCategories} />
 
       {/* Recurring charges — below transactions */}
       <RecurringCard merchants={recurringMerchants} knownCustomCategories={knownCustomCategories} />
