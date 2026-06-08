@@ -12,6 +12,7 @@ type Transaction = {
   category: string
   customCategory?: string | null
   ignored?: number
+  accountLabel?: string
 }
 
 type Props = {
@@ -63,6 +64,11 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-text)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full shrink-0">
                 <Repeat2 size={9} />
                 Recurring
+              </span>
+            )}
+            {tx.accountLabel && (
+              <span className="text-[10px] font-medium text-[var(--faint)] bg-[#f5f4f2] border border-[var(--hairline)] px-1.5 py-0.5 rounded-full shrink-0">
+                {tx.accountLabel}
               </span>
             )}
           </div>

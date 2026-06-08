@@ -3,6 +3,23 @@ import * as schema from './schema'
 import type { DB } from './index'
 import { applyCategoryRules, type CategoryRule } from '@/lib/categories'
 
+function shortAccountLabel(accountName: string, institutionName: string): string {
+  const inst = institutionName.toLowerCase()
+  const acc = accountName.toLowerCase()
+  if (inst.includes('american express') || acc.includes('boustany')) return 'Amex'
+  if (inst.includes('td') || inst.includes('toronto-dominion')) {
+    if (acc.includes('chequing') || acc.includes('checking')) return 'TD Chequing'
+    if (acc.includes('savings') || acc.includes('epremium')) return 'TD Savings'
+    if (acc.includes('visa') || acc.includes('rewards')) return 'TD Visa'
+    return 'TD'
+  }
+  if (inst.includes('wealthsimple')) {
+    if (acc.includes('tfsa')) return 'WS TFSA'
+    return 'WS Debit'
+  }
+  return accountName.substring(0, 14)
+}
+
 function localDateString(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
@@ -171,8 +188,12 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
       ignored: schema.transactions.ignored,
+      accountName: schema.accounts.name,
+      institutionName: schema.items.institutionName,
     })
     .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
     .where(
       and(
         gte(schema.transactions.date, start),
@@ -184,7 +205,12 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
     .all()
 
   return applyCategoryRules(
-    rows.map((r) => ({ ...r, merchantName: r.merchantName ?? null, customCategory: r.customCategory ?? null })),
+    rows.map((r) => ({
+      ...r,
+      merchantName: r.merchantName ?? null,
+      customCategory: r.customCategory ?? null,
+      accountLabel: shortAccountLabel(r.accountName ?? '', r.institutionName ?? ''),
+    })),
     rules,
   )
 }
