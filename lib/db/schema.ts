@@ -101,3 +101,14 @@ export const manualRecurring = sqliteTable('manual_recurring', {
 export const dismissedRecurring = sqliteTable('dismissed_recurring', {
   merchantName: text('merchant_name').primaryKey(),
 })
+
+export const committedItems = sqliteTable('committed_items', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type').notNull(),          // 'income' | 'expense'
+  expectedAmount: real('expected_amount').notNull(),
+  expectedDay: integer('expected_day'),  // nullable
+  merchantName: text('merchant_name'),   // nullable, used for matching
+  category: text('category').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
