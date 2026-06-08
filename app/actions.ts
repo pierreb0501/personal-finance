@@ -15,6 +15,9 @@ import {
   dismissRecurringMerchant,
   addManualRecurring,
   deleteManualRecurring,
+  updateManualRecurringCategory,
+  addCommittedItem as dbAddCommittedItem,
+  deleteCommittedItem as dbDeleteCommittedItem,
 } from '@/lib/db/queries'
 
 export async function saveCategoryRule(merchantName: string, category: string): Promise<void> {
@@ -95,5 +98,42 @@ export async function addRecurring(merchantName: string, dayOfMonth: number, avg
 
 export async function removeManualRecurring(merchantName: string): Promise<void> {
   deleteManualRecurring(db, merchantName)
+  revalidatePath('/spending')
+}
+
+export async function updateRecurringCategory(merchantName: string, category: string, isManual: boolean): Promise<void> {
+  if (isManual) {
+    updateManualRecurringCategory(db, merchantName, category)
+  }
+  // Always save a category rule so future transactions from this merchant get the category
+  upsertCategoryRule(db, merchantName, category)
+  revalidatePath('/spending')
+  revalidatePath('/budget')
+}
+
+export async function addCommittedIncomeItem(
+  name: string,
+  expectedAmount: number,
+  category: string,
+  expectedDay?: number,
+  merchantName?: string,
+): Promise<void> {
+  dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName)
+  revalidatePath('/spending')
+}
+
+export async function addCommittedExpenseItem(
+  name: string,
+  expectedAmount: number,
+  category: string,
+  expectedDay?: number,
+  merchantName?: string,
+): Promise<void> {
+  dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName)
+  revalidatePath('/spending')
+}
+
+export async function deleteCommittedItem(id: string): Promise<void> {
+  dbDeleteCommittedItem(db, id)
   revalidatePath('/spending')
 }
