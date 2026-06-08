@@ -177,12 +177,10 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
       and(
         gte(schema.transactions.date, start),
         sql`${schema.transactions.date} <= ${end}`,
-        // Regular expenses + all TRANSFER_IN (so user can label/deduct them)
-        sql`(${schema.transactions.amount} > 0 OR ${schema.transactions.category} = 'TRANSFER_IN')`,
         eq(schema.transactions.pending, 0),
       ),
     )
-    .orderBy(desc(schema.transactions.date), desc(schema.transactions.amount))
+    .orderBy(desc(schema.transactions.date), sql`ABS(${schema.transactions.amount}) DESC`)
     .all()
 
   return applyCategoryRules(
@@ -285,6 +283,22 @@ export function upsertCategoryRule(db: DB, merchantName: string, category: strin
 
 export function deleteCategoryRule(db: DB, id: string): void {
   db.delete(schema.categoryRules).where(eq(schema.categoryRules.id, id)).run()
+}
+
+export function applyAllCategoryRules(db: DB): void {
+  const rules = getMerchantRules(db)
+  for (const rule of rules) {
+    db
+      .update(schema.transactions)
+      .set({ customCategory: rule.category })
+      .where(
+        and(
+          eq(schema.transactions.merchantName, rule.merchantName),
+          sql`${schema.transactions.customCategory} IS NULL`,
+        )
+      )
+      .run()
+  }
 }
 
 export function updateTransactionCategory(db: DB, txId: string, category: string): void {
@@ -514,6 +528,10 @@ export function deleteManualRecurring(db: DB, merchantName: string): void {
   db.delete(schema.manualRecurring).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
 }
 
+export function updateManualRecurringCategory(db: DB, merchantName: string, category: string): void {
+  db.update(schema.manualRecurring).set({ category }).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
+}
+
 export function getCategoryTrendMonths(db: DB, count = 6) {
   const now = new Date()
   // First day of the earliest month we want
@@ -598,4 +616,109 @@ export function addCustomCategory(db: DB, name: string, color?: string): void {
 
 export function deleteCustomCategory(db: DB, id: string): void {
   db.delete(schema.customCategories).where(eq(schema.customCategories.id, id)).run()
+}
+
+// ─── Committed Items ──────────────────────────────────────────────────────────
+
+export function getCommittedItems(db: DB) {
+  return db
+    .select()
+    .from(schema.committedItems)
+    .orderBy(asc(schema.committedItems.createdAt))
+    .all()
+}
+
+export function addCommittedItem(
+  db: DB,
+  name: string,
+  type: 'income' | 'expense',
+  expectedAmount: number,
+  category: string,
+  expectedDay?: number,
+  merchantName?: string,
+): void {
+  db.insert(schema.committedItems)
+    .values({
+      id: crypto.randomUUID(),
+      name,
+      type,
+      expectedAmount,
+      category,
+      expectedDay: expectedDay ?? null,
+      merchantName: merchantName ?? null,
+      createdAt: Math.floor(Date.now() / 1000),
+    })
+    .run()
+}
+
+export function deleteCommittedItem(db: DB, id: string): void {
+  db.delete(schema.committedItems)
+    .where(eq(schema.committedItems.id, id))
+    .run()
+}
+
+export type CommittedItemWithStatus = {
+  id: string
+  name: string
+  type: 'income' | 'expense'
+  expectedAmount: number
+  expectedDay: number | null
+  merchantName: string | null
+  category: string
+  confirmedAmount: number | null
+}
+
+export function getCommittedItemsWithStatus(db: DB, year: number, month: number): CommittedItemWithStatus[] {
+  const { start, end } = monthBounds(year, month)
+  const items = getCommittedItems(db)
+
+  const txs = db
+    .select({
+      id: schema.transactions.id,
+      amount: schema.transactions.amount,
+      merchantName: schema.transactions.merchantName,
+    })
+    .from(schema.transactions)
+    .where(
+      and(
+        gte(schema.transactions.date, start),
+        sql`${schema.transactions.date} <= ${end}`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      )
+    )
+    .all()
+
+  return items.map((item) => {
+    const isIncome = item.type === 'income'
+    const candidates = txs.filter((tx) => {
+      const rightDirection = isIncome ? tx.amount < 0 : tx.amount > 0
+      if (!rightDirection) return false
+      const absAmount = Math.abs(tx.amount)
+      // Income: ±30%. Expenses: +35%/-30% (bills can overshoot slightly).
+      const withinRange = isIncome
+        ? absAmount >= item.expectedAmount * 0.7 && absAmount <= item.expectedAmount * 1.3
+        : absAmount >= item.expectedAmount * 0.7 && absAmount <= item.expectedAmount * 1.35
+      if (!withinRange) return false
+      if (item.merchantName) {
+        return tx.merchantName?.toLowerCase().includes(item.merchantName.toLowerCase()) ?? false
+      }
+      return true
+    })
+
+    const best = candidates.sort((a, b) =>
+      Math.abs(Math.abs(a.amount) - item.expectedAmount) - Math.abs(Math.abs(b.amount) - item.expectedAmount)
+    )[0] ?? null
+
+    return {
+      id: item.id,
+      name: item.name,
+      type: item.type as 'income' | 'expense',
+      expectedAmount: item.expectedAmount,
+      expectedDay: item.expectedDay,
+      merchantName: item.merchantName,
+      category: item.category,
+      confirmedAmount: best ? Math.abs(best.amount) : null,
+    }
+  })
 }
