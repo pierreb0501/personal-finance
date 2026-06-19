@@ -105,6 +105,65 @@ export async function getBrokenItems(db: DB) {
     .all()
 }
 
+export async function getAllItemsWithAccounts(db: DB) {
+  const itemRows = await db
+    .select()
+    .from(schema.items)
+    .where(ne(schema.items.id, MANUAL_IMPORT_ITEM_ID))
+    .orderBy(asc(schema.items.institutionName))
+    .all()
+
+  const accountRows = await getAllAccounts(db)
+
+  return itemRows.map((item) => ({
+    id: item.id,
+    institutionName: item.institutionName,
+    status: item.status,
+    accounts: accountRows.filter((a) => a.itemId === item.id),
+  }))
+}
+
+// Deletes an account and its dependent rows. If it was the last account on its
+// item, also deletes the item and returns its access token so the caller can
+// revoke it with Plaid.
+export async function deleteAccount(db: DB, accountId: string): Promise<{ itemDeleted: boolean; accessToken: string | null }> {
+  const account = await db
+    .select({ itemId: schema.accounts.itemId })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.id, accountId))
+    .get()
+
+  if (!account) return { itemDeleted: false, accessToken: null }
+
+  await db.delete(schema.holdings).where(eq(schema.holdings.accountId, accountId)).run()
+  await db.delete(schema.transactions).where(eq(schema.transactions.accountId, accountId)).run()
+  await db.delete(schema.accounts).where(eq(schema.accounts.id, accountId)).run()
+
+  if (account.itemId === MANUAL_IMPORT_ITEM_ID) {
+    return { itemDeleted: false, accessToken: null }
+  }
+
+  const remaining = await db
+    .select({ id: schema.accounts.id })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.itemId, account.itemId))
+    .all()
+
+  if (remaining.length > 0) {
+    return { itemDeleted: false, accessToken: null }
+  }
+
+  const item = await db
+    .select({ accessToken: schema.items.accessToken })
+    .from(schema.items)
+    .where(eq(schema.items.id, account.itemId))
+    .get()
+
+  await db.delete(schema.items).where(eq(schema.items.id, account.itemId)).run()
+
+  return { itemDeleted: true, accessToken: item?.accessToken ?? null }
+}
+
 export async function getLastSyncedAt(db: DB): Promise<number | null> {
   const result = await db
     .select({ maxUpdated: sql<number>`MAX(${schema.accounts.updatedAt})` })

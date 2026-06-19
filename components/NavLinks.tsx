@@ -10,6 +10,7 @@ import {
   Target,
   Tag,
   Repeat2,
+  Landmark,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { label: 'Budget',      href: '/budget',      icon: Target },
   { label: 'Investments', href: '/investments', icon: BarChart2 },
   { label: 'Categories',  href: '/categories',  icon: Tag },
+  { label: 'Accounts',    href: '/accounts',    icon: Landmark },
 ]
 
 export function NavLinks() {

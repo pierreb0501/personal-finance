@@ -2,7 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { db } from '@/lib/db'
+import { plaidClient } from '@/lib/plaid'
 import {
+  deleteAccount as dbDeleteAccount,
   upsertCategoryRule,
   deleteCategoryRule as dbDeleteCategoryRule,
   upsertSetting,
@@ -160,5 +162,25 @@ export async function setMerchantGroup(merchantName: string, groupName: string |
   } else {
     dbSetAutoRecurringGroup(db, merchantName, groupName)
   }
+  revalidatePath('/recurring')
+}
+
+export async function removeAccount(accountId: string): Promise<void> {
+  const { itemDeleted, accessToken } = await dbDeleteAccount(db, accountId)
+
+  if (itemDeleted && accessToken) {
+    try {
+      await plaidClient.itemRemove({ access_token: accessToken })
+    } catch (err) {
+      console.error('Plaid itemRemove failed (item already deleted locally):', err)
+    }
+  }
+
+  revalidatePath('/')
+  revalidatePath('/accounts')
+  revalidatePath('/spending')
+  revalidatePath('/net-worth')
+  revalidatePath('/investments')
+  revalidatePath('/budget')
   revalidatePath('/recurring')
 }
