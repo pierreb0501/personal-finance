@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
 
     // Update mode: re-authenticate an existing broken item rather than linking a new one
     if (itemId) {
-      const item = db.select().from(items).where(eq(items.id, itemId)).get()
+      const item = await db.select().from(items).where(eq(items.id, itemId)).get()
       if (!item) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
 
       const response = await plaidClient.linkTokenCreate({

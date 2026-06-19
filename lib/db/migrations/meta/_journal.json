@@ -40,36 +40,43 @@
     {
       "idx": 5,
       "version": "6",
-      "when": 1748908800000,
+      "when": 1780500000001,
       "tag": "0005_custom_categories",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "6",
-      "when": 1748995200000,
+      "when": 1780500000002,
       "tag": "0006_recurring_overrides",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "6",
-      "when": 1749081600000,
+      "when": 1780500000003,
       "tag": "0007_committed_items",
       "breakpoints": true
     },
     {
       "idx": 8,
       "version": "6",
-      "when": 1749168000000,
+      "when": 1780500000004,
       "tag": "0008_recurring_groups",
       "breakpoints": true
     },
     {
       "idx": 9,
       "version": "6",
-      "when": 1750291200000,
+      "when": 1780500000005,
       "tag": "0009_item_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1780500000006,
+      "tag": "0010_raw_name",
       "breakpoints": true
     }
   ]

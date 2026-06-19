@@ -1,12 +1,13 @@
-import { desc, eq, and, gte, sql, asc, lt } from 'drizzle-orm'
+import { desc, eq, and, gte, sql, asc, lt, ne } from 'drizzle-orm'
 import * as schema from './schema'
 import type { DB } from './index'
 import { applyCategoryRules, type CategoryRule } from '@/lib/categories'
+import { MANUAL_IMPORT_ITEM_ID } from '@/lib/constants'
 
 function shortAccountLabel(accountName: string, institutionName: string): string {
   const inst = institutionName.toLowerCase()
   const acc = accountName.toLowerCase()
-  if (inst.includes('american express') || acc.includes('boustany')) return 'Amex'
+  if (inst.includes('american express') || acc.includes('american express') || acc.includes('boustany')) return 'Amex'
   if (inst.includes('td') || inst.includes('toronto-dominion')) {
     if (acc.includes('chequing') || acc.includes('checking')) return 'TD Chequing'
     if (acc.includes('savings') || acc.includes('epremium')) return 'TD Savings'
@@ -36,16 +37,17 @@ function monthBounds(year?: number, month?: number): { start: string; end: strin
 
 // ─── Snapshots ───────────────────────────────────────────────────────────────
 
-export function getLatestSnapshot(db: DB) {
-  return db
+export async function getLatestSnapshot(db: DB) {
+  const row = await db
     .select()
     .from(schema.snapshots)
     .orderBy(desc(schema.snapshots.date))
     .limit(1)
-    .get() ?? null
+    .get()
+  return row ?? null
 }
 
-export function getSnapshotHistory(db: DB, days: number) {
+export async function getSnapshotHistory(db: DB, days: number) {
   const since = new Date()
   since.setDate(since.getDate() - days)
   return db
@@ -56,7 +58,7 @@ export function getSnapshotHistory(db: DB, days: number) {
     .all()
 }
 
-export function getAllSnapshotHistory(db: DB) {
+export async function getAllSnapshotHistory(db: DB) {
   return db
     .select()
     .from(schema.snapshots)
@@ -66,15 +68,36 @@ export function getAllSnapshotHistory(db: DB) {
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
-export function getAllAccounts(db: DB) {
+export async function getAllAccounts(db: DB) {
   return db
     .select()
     .from(schema.accounts)
+    .where(ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID))
     .orderBy(asc(schema.accounts.type), asc(schema.accounts.name))
     .all()
 }
 
-export function getBrokenItems(db: DB) {
+export async function getCreditCardBalances(db: DB) {
+  const rows = await db
+    .select({
+      name: schema.accounts.name,
+      balanceCurrent: schema.accounts.balanceCurrent,
+      institutionName: schema.items.institutionName,
+    })
+    .from(schema.accounts)
+    .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
+    .where(and(eq(schema.accounts.type, 'credit'), ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID)))
+    .all()
+
+  return rows
+    .map((r) => ({
+      label: shortAccountLabel(r.name, r.institutionName ?? ''),
+      balance: r.balanceCurrent,
+    }))
+    .sort((a, b) => b.balance - a.balance)
+}
+
+export async function getBrokenItems(db: DB) {
   return db
     .select({ id: schema.items.id, institutionName: schema.items.institutionName })
     .from(schema.items)
@@ -82,8 +105,8 @@ export function getBrokenItems(db: DB) {
     .all()
 }
 
-export function getLastSyncedAt(db: DB): number | null {
-  const result = db
+export async function getLastSyncedAt(db: DB): Promise<number | null> {
+  const result = await db
     .select({ maxUpdated: sql<number>`MAX(${schema.accounts.updatedAt})` })
     .from(schema.accounts)
     .get()
@@ -92,9 +115,9 @@ export function getLastSyncedAt(db: DB): number | null {
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 
-export function getMonthlySpend(db: DB, year?: number, month?: number): number {
+export async function getMonthlySpend(db: DB, year?: number, month?: number): Promise<number> {
   const { start, end } = monthBounds(year, month)
-  const result = db
+  const result = await db
     .select({ total: sql<number>`COALESCE(SUM(${schema.transactions.amount}), 0)` })
     .from(schema.transactions)
     .where(
@@ -111,11 +134,45 @@ export function getMonthlySpend(db: DB, year?: number, month?: number): number {
   return result?.total ?? 0
 }
 
-export function getCategoryBreakdown(db: DB, year?: number, month?: number) {
+export async function getSpendByAccount(db: DB, year?: number, month?: number) {
   const { start, end } = monthBounds(year, month)
-  const rules = getMerchantRules(db)
 
-  const rows = db
+  const rows = await db
+    .select({
+      accountName: schema.accounts.name,
+      institutionName: schema.items.institutionName,
+      total: sql<number>`SUM(${schema.transactions.amount})`,
+    })
+    .from(schema.transactions)
+    .innerJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
+    .where(
+      and(
+        gte(schema.transactions.date, start),
+        sql`${schema.transactions.date} <= ${end}`,
+        sql`${schema.transactions.amount} > 0`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      ),
+    )
+    .groupBy(schema.transactions.accountId)
+    .all()
+
+  const agg = new Map<string, number>()
+  for (const r of rows) {
+    const label = shortAccountLabel(r.accountName, r.institutionName ?? '')
+    agg.set(label, (agg.get(label) ?? 0) + r.total)
+  }
+  return Array.from(agg.entries())
+    .map(([label, total]) => ({ label, total }))
+    .sort((a, b) => b.total - a.total)
+}
+
+export async function getCategoryBreakdown(db: DB, year?: number, month?: number) {
+  const { start, end } = monthBounds(year, month)
+  const rules = await getMerchantRules(db)
+
+  const rows = await db
     .select({
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
@@ -152,14 +209,15 @@ export function getCategoryBreakdown(db: DB, year?: number, month?: number) {
     .sort((a, b) => b.total - a.total)
 }
 
-export function getRecentTransactions(db: DB, limit = 20) {
-  const rules = getMerchantRules(db)
-  const rows = db
+export async function getRecentTransactions(db: DB, limit = 20) {
+  const rules = await getMerchantRules(db)
+  const rows = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
       date: schema.transactions.date,
       merchantName: schema.transactions.merchantName,
+      rawName: schema.transactions.rawName,
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
@@ -182,16 +240,17 @@ export function getRecentTransactions(db: DB, limit = 20) {
   )
 }
 
-export function getTransactionsForMonth(db: DB, year: number, month: number) {
+export async function getTransactionsForMonth(db: DB, year: number, month: number) {
   const { start, end } = monthBounds(year, month)
-  const rules = getMerchantRules(db)
+  const rules = await getMerchantRules(db)
 
-  const rows = db
+  const rows = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
       date: schema.transactions.date,
       merchantName: schema.transactions.merchantName,
+      rawName: schema.transactions.rawName,
       category: schema.transactions.category,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
@@ -223,12 +282,12 @@ export function getTransactionsForMonth(db: DB, year: number, month: number) {
   )
 }
 
-export function getUnlabeledTransfers(db: DB, year?: number, month?: number) {
+export async function getUnlabeledTransfers(db: DB, year?: number, month?: number) {
   const { start, end } = monthBounds(year, month)
-  const rules = getMerchantRules(db)
+  const rules = await getMerchantRules(db)
   const ruleMap = new Map(rules.map((r) => [r.merchantName, r.category]))
 
-  const rows = db
+  const rows = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
@@ -257,8 +316,8 @@ export function getUnlabeledTransfers(db: DB, year?: number, month?: number) {
   return rows.filter((tx) => !(tx.merchantName && ruleMap.has(tx.merchantName)))
 }
 
-export function setTransactionIgnored(db: DB, txId: string, ignored: boolean): void {
-  db.update(schema.transactions)
+export async function setTransactionIgnored(db: DB, txId: string, ignored: boolean): Promise<void> {
+  await db.update(schema.transactions)
     .set({ ignored: ignored ? 1 : 0 })
     .where(eq(schema.transactions.id, txId))
     .run()
@@ -266,7 +325,7 @@ export function setTransactionIgnored(db: DB, txId: string, ignored: boolean): v
 
 // ─── Holdings ─────────────────────────────────────────────────────────────────
 
-export function getAllHoldings(db: DB) {
+export async function getAllHoldings(db: DB) {
   return db
     .select({
       id: schema.holdings.id,
@@ -285,16 +344,16 @@ export function getAllHoldings(db: DB) {
 
 // ─── Category rules ───────────────────────────────────────────────────────────
 
-export function getMerchantRules(db: DB): CategoryRule[] {
+export async function getMerchantRules(db: DB): Promise<CategoryRule[]> {
   return db
     .select()
     .from(schema.categoryRules)
     .all()
 }
 
-export function upsertCategoryRule(db: DB, merchantName: string, category: string): void {
+export async function upsertCategoryRule(db: DB, merchantName: string, category: string): Promise<void> {
   const id = `rule_${merchantName.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}`
-  db
+  await db
     .insert(schema.categoryRules)
     .values({ id, merchantName, category, createdAt: Math.floor(Date.now() / 1000) })
     .onConflictDoUpdate({
@@ -303,7 +362,7 @@ export function upsertCategoryRule(db: DB, merchantName: string, category: strin
     })
     .run()
   // Backfill: apply the rule to any transactions that don't have a manual override yet
-  db
+  await db
     .update(schema.transactions)
     .set({ customCategory: category })
     .where(
@@ -315,14 +374,14 @@ export function upsertCategoryRule(db: DB, merchantName: string, category: strin
     .run()
 }
 
-export function deleteCategoryRule(db: DB, id: string): void {
-  db.delete(schema.categoryRules).where(eq(schema.categoryRules.id, id)).run()
+export async function deleteCategoryRule(db: DB, id: string): Promise<void> {
+  await db.delete(schema.categoryRules).where(eq(schema.categoryRules.id, id)).run()
 }
 
-export function applyAllCategoryRules(db: DB): void {
-  const rules = getMerchantRules(db)
+export async function applyAllCategoryRules(db: DB): Promise<void> {
+  const rules = await getMerchantRules(db)
   for (const rule of rules) {
-    db
+    await db
       .update(schema.transactions)
       .set({ customCategory: rule.category })
       .where(
@@ -335,8 +394,8 @@ export function applyAllCategoryRules(db: DB): void {
   }
 }
 
-export function updateTransactionCategory(db: DB, txId: string, category: string): void {
-  db
+export async function updateTransactionCategory(db: DB, txId: string, category: string): Promise<void> {
+  await db
     .update(schema.transactions)
     .set({ customCategory: category })
     .where(eq(schema.transactions.id, txId))
@@ -345,8 +404,8 @@ export function updateTransactionCategory(db: DB, txId: string, category: string
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
-export function getSetting(db: DB, key: string): string | null {
-  const row = db
+export async function getSetting(db: DB, key: string): Promise<string | null> {
+  const row = await db
     .select()
     .from(schema.settings)
     .where(eq(schema.settings.key, key))
@@ -354,8 +413,8 @@ export function getSetting(db: DB, key: string): string | null {
   return row?.value ?? null
 }
 
-export function upsertSetting(db: DB, key: string, value: string): void {
-  db
+export async function upsertSetting(db: DB, key: string, value: string): Promise<void> {
+  await db
     .insert(schema.settings)
     .values({ key, value })
     .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
@@ -364,7 +423,7 @@ export function upsertSetting(db: DB, key: string, value: string): void {
 
 // ─── Category budgets (per-month planner) ────────────────────────────────────
 
-export function getCategoryBudgets(db: DB, year: number, month: number) {
+export async function getCategoryBudgets(db: DB, year: number, month: number) {
   return db
     .select()
     .from(schema.categoryBudgets)
@@ -377,8 +436,8 @@ export function getCategoryBudgets(db: DB, year: number, month: number) {
     .all()
 }
 
-export function upsertCategoryBudget(db: DB, category: string, year: number, month: number, planned: number): void {
-  db
+export async function upsertCategoryBudget(db: DB, category: string, year: number, month: number, planned: number): Promise<void> {
+  await db
     .insert(schema.categoryBudgets)
     .values({ id: `${category}_${year}_${month}`, category, year, month, planned })
     .onConflictDoUpdate({
@@ -388,8 +447,8 @@ export function upsertCategoryBudget(db: DB, category: string, year: number, mon
     .run()
 }
 
-export function deleteCategoryBudget(db: DB, category: string, year: number, month: number): void {
-  db
+export async function deleteCategoryBudget(db: DB, category: string, year: number, month: number): Promise<void> {
+  await db
     .delete(schema.categoryBudgets)
     .where(
       and(
@@ -401,9 +460,9 @@ export function deleteCategoryBudget(db: DB, category: string, year: number, mon
     .run()
 }
 
-export function getMostRecentBudgets(db: DB, beforeYear: number, beforeMonth: number) {
+export async function getMostRecentBudgets(db: DB, beforeYear: number, beforeMonth: number) {
   // Find all months with budgets prior to the given month, pick the most recent one
-  const allPrior = db
+  const allPrior = await db
     .select()
     .from(schema.categoryBudgets)
     .where(
@@ -421,28 +480,27 @@ export function getMostRecentBudgets(db: DB, beforeYear: number, beforeMonth: nu
   return allPrior.filter(b => b.year * 12 + b.month === maxKey)
 }
 
-export function seedBudgetFromPrevious(db: DB, year: number, month: number): void {
-  const previous = getMostRecentBudgets(db, year, month)
+export async function seedBudgetFromPrevious(db: DB, year: number, month: number): Promise<void> {
+  const previous = await getMostRecentBudgets(db, year, month)
   for (const b of previous) {
-    upsertCategoryBudget(db, b.category, year, month, b.planned)
+    await upsertCategoryBudget(db, b.category, year, month, b.planned)
   }
 }
 
 // ─── Custom categories ────────────────────────────────────────────────────────
 
-export function getRecurringMerchants(db: DB) {
+export async function getRecurringMerchants(db: DB) {
   const now = new Date()
   const start = new Date(now.getFullYear(), now.getMonth() - 2, 1)
   const rangeStart = localDateString(start)
 
-  const rules = getMerchantRules(db)
+  const rules = await getMerchantRules(db)
 
-  const dismissed = new Set(
-    db.select().from(schema.dismissedRecurring).all().map(r => r.merchantName)
-  )
-  const manual = db.select().from(schema.manualRecurring).all()
+  const dismissedRows = await db.select().from(schema.dismissedRecurring).all()
+  const dismissed = new Set(dismissedRows.map(r => r.merchantName))
+  const manual = await db.select().from(schema.manualRecurring).all()
 
-  const rows = db
+  const rows = await db
     .select({
       merchantName: schema.transactions.merchantName,
       category: schema.transactions.category,
@@ -544,13 +602,13 @@ export function getRecurringMerchants(db: DB) {
   return result.sort((a, b) => b.avgAmount - a.avgAmount)
 }
 
-export function dismissRecurringMerchant(db: DB, merchantName: string): void {
-  db.insert(schema.dismissedRecurring).values({ merchantName }).onConflictDoNothing().run()
+export async function dismissRecurringMerchant(db: DB, merchantName: string): Promise<void> {
+  await db.insert(schema.dismissedRecurring).values({ merchantName }).onConflictDoNothing().run()
 }
 
-export function addManualRecurring(db: DB, merchantName: string, dayOfMonth: number, avgAmount: number, category: string): void {
+export async function addManualRecurring(db: DB, merchantName: string, dayOfMonth: number, avgAmount: number, category: string): Promise<void> {
   const id = `manual_rec_${Date.now()}`
-  db
+  await db
     .insert(schema.manualRecurring)
     .values({ id, merchantName, dayOfMonth, avgAmount, category, createdAt: Math.floor(Date.now() / 1000) })
     .onConflictDoUpdate({
@@ -560,23 +618,23 @@ export function addManualRecurring(db: DB, merchantName: string, dayOfMonth: num
     .run()
 }
 
-export function deleteManualRecurring(db: DB, merchantName: string): void {
-  db.delete(schema.manualRecurring).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
+export async function deleteManualRecurring(db: DB, merchantName: string): Promise<void> {
+  await db.delete(schema.manualRecurring).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
 }
 
-export function updateManualRecurringCategory(db: DB, merchantName: string, category: string): void {
-  db.update(schema.manualRecurring).set({ category }).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
+export async function updateManualRecurringCategory(db: DB, merchantName: string, category: string): Promise<void> {
+  await db.update(schema.manualRecurring).set({ category }).where(eq(schema.manualRecurring.merchantName, merchantName)).run()
 }
 
-export function getCategoryTrendMonths(db: DB, count = 6) {
+export async function getCategoryTrendMonths(db: DB, count = 6) {
   const now = new Date()
   // First day of the earliest month we want
   const startDate = new Date(now.getFullYear(), now.getMonth() - (count - 1), 1)
   const rangeStart = localDateString(startDate)
 
-  const rules = getMerchantRules(db)
+  const rules = await getMerchantRules(db)
 
-  const rows = db
+  const rows = await db
     .select({
       year: sql<number>`CAST(strftime('%Y', ${schema.transactions.date}) AS INTEGER)`,
       month: sql<number>`CAST(strftime('%m', ${schema.transactions.date}) AS INTEGER)`,
@@ -633,7 +691,7 @@ export function getCategoryTrendMonths(db: DB, count = 6) {
   }))
 }
 
-export function getCustomCategories(db: DB) {
+export async function getCustomCategories(db: DB) {
   return db
     .select()
     .from(schema.customCategories)
@@ -641,22 +699,22 @@ export function getCustomCategories(db: DB) {
     .all()
 }
 
-export function addCustomCategory(db: DB, name: string, color?: string): void {
+export async function addCustomCategory(db: DB, name: string, color?: string): Promise<void> {
   const id = `custom_${Date.now()}`
-  db
+  await db
     .insert(schema.customCategories)
     .values({ id, name, color: color ?? null, createdAt: Math.floor(Date.now() / 1000) })
     .onConflictDoNothing()
     .run()
 }
 
-export function deleteCustomCategory(db: DB, id: string): void {
-  db.delete(schema.customCategories).where(eq(schema.customCategories.id, id)).run()
+export async function deleteCustomCategory(db: DB, id: string): Promise<void> {
+  await db.delete(schema.customCategories).where(eq(schema.customCategories.id, id)).run()
 }
 
 // ─── Committed Items ──────────────────────────────────────────────────────────
 
-export function getCommittedItems(db: DB) {
+export async function getCommittedItems(db: DB) {
   return db
     .select()
     .from(schema.committedItems)
@@ -664,7 +722,7 @@ export function getCommittedItems(db: DB) {
     .all()
 }
 
-export function addCommittedItem(
+export async function addCommittedItem(
   db: DB,
   name: string,
   type: 'income' | 'expense',
@@ -672,8 +730,8 @@ export function addCommittedItem(
   category: string,
   expectedDay?: number,
   merchantName?: string,
-): void {
-  db.insert(schema.committedItems)
+): Promise<void> {
+  await db.insert(schema.committedItems)
     .values({
       id: crypto.randomUUID(),
       name,
@@ -687,8 +745,8 @@ export function addCommittedItem(
     .run()
 }
 
-export function deleteCommittedItem(db: DB, id: string): void {
-  db.delete(schema.committedItems)
+export async function deleteCommittedItem(db: DB, id: string): Promise<void> {
+  await db.delete(schema.committedItems)
     .where(eq(schema.committedItems.id, id))
     .run()
 }
@@ -707,11 +765,11 @@ export type CommittedItemWithStatus = {
   confirmedAccountLabel: string | null
 }
 
-export function getCommittedItemsWithStatus(db: DB, year: number, month: number): CommittedItemWithStatus[] {
+export async function getCommittedItemsWithStatus(db: DB, year: number, month: number): Promise<CommittedItemWithStatus[]> {
   const { start, end } = monthBounds(year, month)
-  const items = getCommittedItems(db)
+  const items = await getCommittedItems(db)
 
-  const txs = db
+  const txs = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
@@ -806,15 +864,15 @@ export type RecurringMerchantWithStatus = {
   confirmedAccountLabel: string | null
 }
 
-export function getRecurringMerchantsWithStatus(db: DB, year: number, month: number): RecurringMerchantWithStatus[] {
-  const merchants = getRecurringMerchants(db)
+export async function getRecurringMerchantsWithStatus(db: DB, year: number, month: number): Promise<RecurringMerchantWithStatus[]> {
+  const merchants = await getRecurringMerchants(db)
   const { start, end } = monthBounds(year, month)
 
   // Load group assignments for auto-detected merchants
-  const groupRows = db.select().from(schema.recurringMerchantGroups).all()
+  const groupRows = await db.select().from(schema.recurringMerchantGroups).all()
   const groupMap = new Map(groupRows.map((r) => [r.merchantName, r.groupName]))
 
-  const txs = db
+  const txs = await db
     .select({
       merchantName: schema.transactions.merchantName,
       amount: schema.transactions.amount,
@@ -879,27 +937,27 @@ export function getRecurringMerchantsWithStatus(db: DB, year: number, month: num
   })
 }
 
-export function setCommittedItemGroup(db: DB, id: string, groupName: string | null): void {
-  db.update(schema.committedItems)
+export async function setCommittedItemGroup(db: DB, id: string, groupName: string | null): Promise<void> {
+  await db.update(schema.committedItems)
     .set({ groupName: groupName ?? null })
     .where(eq(schema.committedItems.id, id))
     .run()
 }
 
-export function setManualRecurringGroup(db: DB, merchantName: string, groupName: string | null): void {
-  db.update(schema.manualRecurring)
+export async function setManualRecurringGroup(db: DB, merchantName: string, groupName: string | null): Promise<void> {
+  await db.update(schema.manualRecurring)
     .set({ groupName: groupName ?? null })
     .where(eq(schema.manualRecurring.merchantName, merchantName))
     .run()
 }
 
-export function setAutoRecurringGroup(db: DB, merchantName: string, groupName: string | null): void {
+export async function setAutoRecurringGroup(db: DB, merchantName: string, groupName: string | null): Promise<void> {
   if (groupName === null) {
-    db.delete(schema.recurringMerchantGroups)
+    await db.delete(schema.recurringMerchantGroups)
       .where(eq(schema.recurringMerchantGroups.merchantName, merchantName))
       .run()
   } else {
-    db.insert(schema.recurringMerchantGroups)
+    await db.insert(schema.recurringMerchantGroups)
       .values({ merchantName, groupName })
       .onConflictDoUpdate({
         target: schema.recurringMerchantGroups.merchantName,

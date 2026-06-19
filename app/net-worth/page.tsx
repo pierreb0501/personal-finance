@@ -7,10 +7,10 @@ import { AccountRow } from '@/components/AccountRow'
 import { EmptyState } from '@/components/EmptyState'
 import { Landmark } from 'lucide-react'
 
-export default function NetWorthPage() {
-  const latest = getLatestSnapshot(db)
-  const history = getAllSnapshotHistory(db)
-  const accounts = getAllAccounts(db)
+export default async function NetWorthPage() {
+  const latest = await getLatestSnapshot(db)
+  const history = await getAllSnapshotHistory(db)
+  const accounts = await getAllAccounts(db)
 
   const prev = history.length >= 2 ? history[0] : null
   const delta = latest && prev ? latest.netWorth - prev.netWorth : null

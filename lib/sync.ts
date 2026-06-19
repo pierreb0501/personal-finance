@@ -1,32 +1,33 @@
-import { eq, inArray, sql } from 'drizzle-orm'
+import { eq, inArray, ne, sql } from 'drizzle-orm'
 import type { DB } from './db/index'
 import * as schema from './db/schema'
 import { db as defaultDb } from './db/index'
 import { plaidClient } from './plaid'
 import { applyAllCategoryRules } from './db/queries'
+import { MANUAL_IMPORT_ITEM_ID } from './constants'
 
 type Item = typeof schema.items.$inferSelect
 
 // syncAll accepts an optional db for testability.
 // Tests always pass an explicit in-memory db; production uses the default singleton.
 export async function syncAll(db: DB = defaultDb) {
-  const allItems = db.select().from(schema.items).all()
+  const allItems = await db.select().from(schema.items).all()
   for (const item of allItems) {
     try {
       await syncItem(db, item)
       if (item.status !== 'ok') {
-        db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
+        await db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
       }
     } catch (err) {
       console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
       const plaidErrorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
       if (plaidErrorCode === 'ITEM_LOGIN_REQUIRED') {
-        db.update(schema.items).set({ status: 'login_required' }).where(eq(schema.items.id, item.id)).run()
+        await db.update(schema.items).set({ status: 'login_required' }).where(eq(schema.items.id, item.id)).run()
       }
     }
   }
-  applyAllCategoryRules(db)  // Apply saved merchant rules to any newly synced transactions
-  writeSnapshot(db)  // Once, after all items, so snapshot reflects complete state
+  await applyAllCategoryRules(db)  // Apply saved merchant rules to any newly synced transactions
+  await writeSnapshot(db)  // Once, after all items, so snapshot reflects complete state
 }
 
 export async function syncItem(db: DB, item: Item) {
@@ -51,7 +52,7 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
   const ts = Math.floor(Date.now() / 1000)
 
   for (const acc of plaidAccounts) {
-    db.insert(schema.accounts)
+    await db.insert(schema.accounts)
       .values({
         id: crypto.randomUUID(),
         itemId: item.id,
@@ -74,11 +75,11 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
       })
       .run()
 
-    const row = db
+    const row = (await db
       .select({ id: schema.accounts.id })
       .from(schema.accounts)
       .where(eq(schema.accounts.plaidAccountId, acc.account_id))
-      .get()!
+      .get())!
     map.set(acc.account_id, row.id)
   }
 
@@ -100,13 +101,14 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
       const accountId = accountMap.get(tx.account_id)
       if (!accountId) continue
 
-      db.insert(schema.transactions)
+      await db.insert(schema.transactions)
         .values({
           id: tx.transaction_id,
           accountId,
           amount: tx.amount,
           date: tx.date,
           merchantName: tx.merchant_name ?? null,
+          rawName: tx.name ?? null,
           category: tx.personal_finance_category?.primary ?? 'OTHER',
           categoryDetailed: tx.personal_finance_category?.detailed ?? 'OTHER_OTHER',
           pending: tx.pending ? 1 : 0,
@@ -117,6 +119,7 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
             amount: tx.amount,
             date: tx.date,
             merchantName: tx.merchant_name ?? null,
+            rawName: tx.name ?? null,
             category: tx.personal_finance_category?.primary ?? 'OTHER',
             categoryDetailed: tx.personal_finance_category?.detailed ?? 'OTHER_OTHER',
             pending: tx.pending ? 1 : 0,
@@ -128,7 +131,7 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
     if (removed.length > 0) {
       const ids = removed.map((r) => r.transaction_id).filter((id): id is string => typeof id === 'string')
       if (ids.length > 0) {
-        db.delete(schema.transactions)
+        await db.delete(schema.transactions)
           .where(inArray(schema.transactions.id, ids))
           .run()
       }
@@ -138,7 +141,7 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
     hasMore = has_more
 
     // Save cursor after each page to ensure progress is not lost
-    db.update(schema.items)
+    await db.update(schema.items)
       .set({ cursor })
       .where(eq(schema.items.id, item.id))
       .run()
@@ -196,7 +199,7 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   // We will scale individual holding values so they sum exactly to this balance.
   const accountBalances = new Map<string, number>()
   for (const [plaidAccountId, internalId] of accountMap.entries()) {
-    const row = db
+    const row = await db
       .select({ balanceCurrent: schema.accounts.balanceCurrent })
       .from(schema.accounts)
       .where(eq(schema.accounts.id, internalId))
@@ -235,9 +238,9 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
     })
   }
 
-  db.transaction((tx) => {
+  await db.transaction(async (tx) => {
     if (internalAccountIds.length > 0) {
-      tx.delete(schema.holdings)
+      await tx.delete(schema.holdings)
         .where(inArray(schema.holdings.accountId, internalAccountIds))
         .run()
     }
@@ -247,7 +250,7 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
       if (!accountId) continue
       const security = securityMap.get(h.security_id)
 
-      tx.insert(schema.holdings)
+      await tx.insert(schema.holdings)
         .values({
           id: crypto.randomUUID(),
           accountId,
@@ -263,21 +266,22 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   })
 }
 
-function writeSnapshot(db: DB) {
+async function writeSnapshot(db: DB) {
   const today = new Date()
   const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-  const accountTotals = db
+  const accountTotals = await db
     .select({
       assets: sql<number>`COALESCE(SUM(CASE WHEN type IN ('depository', 'investment', 'other') THEN balance_current ELSE 0 END), 0)`,
       liabilities: sql<number>`COALESCE(SUM(CASE WHEN type IN ('credit', 'loan') THEN balance_current ELSE 0 END), 0)`,
     })
     .from(schema.accounts)
+    .where(ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID))
     .get()
 
   // Use investment account balance_current directly — this is the exact value
   // the institution reports, not a computed approximation from holdings.
-  const investmentsTotals = db
+  const investmentsTotals = await db
     .select({ total: sql<number>`COALESCE(SUM(balance_current), 0)` })
     .from(schema.accounts)
     .where(eq(schema.accounts.type, 'investment'))
@@ -287,7 +291,7 @@ function writeSnapshot(db: DB) {
   const totalLiabilities = accountTotals?.liabilities ?? 0
   const investmentsValue = investmentsTotals?.total ?? 0
 
-  db.insert(schema.snapshots)
+  await db.insert(schema.snapshots)
     .values({
       id: crypto.randomUUID(),
       date: dateStr,

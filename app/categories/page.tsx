@@ -3,8 +3,8 @@ import { getCustomCategories } from '@/lib/db/queries'
 import { CATEGORY_LABELS, getCategoryLabel } from '@/lib/categories'
 import { CategoryManager } from '@/components/CategoryManager'
 
-export default function CategoriesPage() {
-  const customs = getCustomCategories(db)
+export default async function CategoriesPage() {
+  const customs = await getCustomCategories(db)
 
   const builtins = Object.entries(CATEGORY_LABELS).map(([key, label]) => ({ key, label }))
 

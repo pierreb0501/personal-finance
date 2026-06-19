@@ -3,17 +3,15 @@ import { db } from '@/lib/db'
 import { items, accounts, transactions } from '@/lib/db/schema'
 import { applyAllCategoryRules } from '@/lib/db/queries'
 import { revalidatePath } from 'next/cache'
-
-const MANUAL_ITEM_ID = 'manual-csv-import'
-const AMEX_ACCOUNT_ID = 'amex-csv-account'
+import { MANUAL_IMPORT_ITEM_ID as MANUAL_ITEM_ID, AMEX_CSV_ACCOUNT_ID as AMEX_ACCOUNT_ID } from '@/lib/constants'
 
 const MONTH_MAP: Record<string, string> = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
 }
 
-function ensureAmexAccount() {
-  db.insert(items).values({
+async function ensureAmexAccount() {
+  await db.insert(items).values({
     id: MANUAL_ITEM_ID,
     plaidItemId: MANUAL_ITEM_ID,
     accessToken: 'manual',
@@ -21,7 +19,7 @@ function ensureAmexAccount() {
     createdAt: Math.floor(Date.now() / 1000),
   }).onConflictDoNothing().run()
 
-  db.insert(accounts).values({
+  await db.insert(accounts).values({
     id: AMEX_ACCOUNT_ID,
     itemId: MANUAL_ITEM_ID,
     plaidAccountId: AMEX_ACCOUNT_ID,
@@ -165,28 +163,29 @@ export async function POST(req: NextRequest) {
     const rows = parseAmexCsv(text)
     if (rows.length === 0) return NextResponse.json({ error: 'No transactions found in CSV' }, { status: 400 })
 
-    ensureAmexAccount()
+    await ensureAmexAccount()
 
     let imported = 0
     let skipped = 0
 
     for (const row of rows) {
-      const result = db.insert(transactions).values({
+      const result = await db.insert(transactions).values({
         id: row.id,
         accountId: AMEX_ACCOUNT_ID,
         amount: row.amount,
         date: row.date,
         merchantName: row.description,
+        rawName: row.description,
         category: 'OTHER',
         categoryDetailed: 'OTHER_OTHER',
         pending: 0,
       }).onConflictDoNothing().run()
 
-      if (result.changes > 0) imported++
+      if (result.rowsAffected > 0) imported++
       else skipped++
     }
 
-    applyAllCategoryRules(db)
+    await applyAllCategoryRules(db)
     revalidatePath('/')
     revalidatePath('/spending')
     revalidatePath('/budget')

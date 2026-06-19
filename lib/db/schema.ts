@@ -33,6 +33,7 @@ export const transactions = sqliteTable('transactions', {
   amount: real('amount').notNull(),
   date: text('date').notNull(),
   merchantName: text('merchant_name'),
+  rawName: text('raw_name'),
   category: text('category').notNull(),
   categoryDetailed: text('category_detailed').notNull(),
   pending: integer('pending').notNull(),

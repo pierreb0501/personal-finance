@@ -11,6 +11,7 @@ import {
   getSetting,
   getAllAccounts,
   getUnlabeledTransfers,
+  getCreditCardBalances,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -37,18 +38,20 @@ function formatDate(): string {
   })
 }
 
-export default function OverviewPage() {
-  const latest = getLatestSnapshot(db)
-  const history = getAllSnapshotHistory(db)
-  const monthlySpend = getMonthlySpend(db)
-  const allowance = Number(getSetting(db, 'allowance') ?? '3000')
-  const income = Number(getSetting(db, 'income') ?? '0')
-  const categories = getCategoryBreakdown(db)
-  const holdings = getAllHoldings(db)
-  const transactions = getRecentTransactions(db, 4)
-  const rules = getMerchantRules(db)
-  const accounts = getAllAccounts(db)
-  const unlabeledTransfers = getUnlabeledTransfers(db)
+export default async function OverviewPage() {
+  const latest = await getLatestSnapshot(db)
+  const history = await getAllSnapshotHistory(db)
+  const monthlySpend = await getMonthlySpend(db)
+  const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
+  const income = Number((await getSetting(db, 'income')) ?? '0')
+  const categories = await getCategoryBreakdown(db)
+  const holdings = await getAllHoldings(db)
+  const transactions = await getRecentTransactions(db, 4)
+  const rules = await getMerchantRules(db)
+  const accounts = await getAllAccounts(db)
+  const unlabeledTransfers = await getUnlabeledTransfers(db)
+  const cardBalances = await getCreditCardBalances(db)
+  const totalOwed = cardBalances.reduce((s, c) => s + c.balance, 0)
 
   const spendRatio = allowance > 0 ? monthlySpend / allowance : 0
   const remaining = allowance - monthlySpend
@@ -162,6 +165,31 @@ export default function OverviewPage() {
           )}
         </div>
       </div>
+
+      {/* Card balances */}
+      {cardBalances.length > 0 && (
+        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
+                Card balances
+              </h3>
+              <p className="text-[13px] text-[var(--muted-text)] mt-0.5">What you currently owe</p>
+            </div>
+            <p className="font-bold text-[24px] tracking-tight tabular-nums leading-none text-[var(--negative)]">
+              {formatCAD(totalOwed)}
+            </p>
+          </div>
+          <div className="space-y-2.5">
+            {cardBalances.map((c) => (
+              <div key={c.label} className="flex items-center justify-between text-[13px]">
+                <span className="font-medium text-[var(--ink)]">{c.label}</span>
+                <span className="font-semibold tabular-nums text-[var(--negative)]">{formatCAD(c.balance)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Row 2: Allocation donut + Recent activity */}
       <div className="grid gap-[18px]" style={{ gridTemplateColumns: '1fr 1.6fr' }}>

@@ -12,8 +12,8 @@ function formatRelative(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-export function SyncStatus() {
-  const lastSync = getLastSyncedAt(db)
+export async function SyncStatus() {
+  const lastSync = await getLastSyncedAt(db)
   const now = Math.floor(Date.now() / 1000)
 
   if (!lastSync) {

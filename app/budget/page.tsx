@@ -22,15 +22,15 @@ export default async function BudgetPage({
   const month = monthStr ? Number(monthStr) : now.getMonth() + 1
 
   // Auto-seed from previous month on first visit
-  let budgets = getCategoryBudgets(db, year, month)
+  let budgets = await getCategoryBudgets(db, year, month)
   if (budgets.length === 0) {
-    seedBudgetFromPrevious(db, year, month)
-    budgets = getCategoryBudgets(db, year, month)
+    await seedBudgetFromPrevious(db, year, month)
+    budgets = await getCategoryBudgets(db, year, month)
   }
 
-  const breakdown = getCategoryBreakdown(db, year, month)
-  const rules = getMerchantRules(db)
-  const customCats = getCustomCategories(db)
+  const breakdown = await getCategoryBreakdown(db, year, month)
+  const rules = await getMerchantRules(db)
+  const customCats = await getCustomCategories(db)
 
   const plannedMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const spendMap = new Map(breakdown.map((c) => [c.category, c.total]))

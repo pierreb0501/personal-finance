@@ -9,6 +9,7 @@ import {
   getCustomCategories,
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
+  getSpendByAccount,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -39,14 +40,15 @@ export default async function SpendingPage({
   const year = yearStr ? Number(yearStr) : now.getFullYear()
   const month = monthStr ? Number(monthStr) : now.getMonth() + 1
 
-  const spend = getMonthlySpend(db, year, month)
-  const allowance = Number(getSetting(db, 'allowance') ?? '3000')
-  const categories = getCategoryBreakdown(db, year, month)
-  const transactions = getTransactionsForMonth(db, year, month)
-  const rules = getMerchantRules(db)
-  const budgets = getCategoryBudgets(db, year, month)
+  const spend = await getMonthlySpend(db, year, month)
+  const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
+  const categories = await getCategoryBreakdown(db, year, month)
+  const spendByAccount = await getSpendByAccount(db, year, month)
+  const transactions = await getTransactionsForMonth(db, year, month)
+  const rules = await getMerchantRules(db)
+  const budgets = await getCategoryBudgets(db, year, month)
   const budgetMap = new Map(budgets.map((b) => [b.category, b.planned]))
-  const committedItems = getCommittedItemsWithStatus(db, year, month)
+  const committedItems = await getCommittedItemsWithStatus(db, year, month)
   const incomeItems = committedItems.filter((i) => i.type === 'income')
   const incomeCategories = new Set(incomeItems.map((i) => i.category))
   const expectedIncome = incomeItems.reduce((s, i) => s + i.expectedAmount, 0)
@@ -82,11 +84,12 @@ export default async function SpendingPage({
   const spendingCategories = categories.filter((c) => !incomeCategories.has(c.category))
   const maxCategoryTotal = spendingCategories[0]?.total ?? 0
 
-  const trendMonths = getCategoryTrendMonths(db, 6).map((m) => ({
+  const trendMonthsRaw = await getCategoryTrendMonths(db, 6)
+  const trendMonths = trendMonthsRaw.map((m) => ({
     ...m,
     breakdown: m.breakdown.filter((b) => !incomeCategories.has(b.category)),
   }))
-  const customCats = getCustomCategories(db)
+  const customCats = await getCustomCategories(db)
   const knownCustomCategories = [...new Set([
     ...rules.map((r) => r.category),
     ...customCats.map((c) => c.name),
@@ -263,6 +266,35 @@ export default async function SpendingPage({
                 />
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spend by account */}
+      {spendByAccount.length > 0 && (
+        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+          <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
+            By account
+          </h3>
+          <p className="text-[13px] text-[var(--muted-text)] mt-0.5 mb-4">Where this month&apos;s spending happened</p>
+          <div className="space-y-3">
+            {spendByAccount.map((a) => {
+              const share = spendByAccount[0].total > 0 ? a.total / spendByAccount[0].total : 0
+              return (
+                <div key={a.label}>
+                  <div className="flex items-center justify-between text-[13px] mb-1">
+                    <span className="font-medium text-[var(--ink)]">{a.label}</span>
+                    <span className="font-semibold tabular-nums text-[var(--ink)]">{formatCAD(a.total)}</span>
+                  </div>
+                  <div className="h-[6px] rounded-full bg-[#f0ede5] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[var(--ink)] opacity-70"
+                      style={{ width: `${Math.max(share * 100, 2)}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

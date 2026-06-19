@@ -23,10 +23,10 @@ export default async function RecurringPage({
   const year = yearStr ? Number(yearStr) : now.getFullYear()
   const month = monthStr ? Number(monthStr) : now.getMonth() + 1
 
-  const committedItems = getCommittedItemsWithStatus(db, year, month)
-  const recurringMerchants = getRecurringMerchantsWithStatus(db, year, month)
-  const rules = getMerchantRules(db)
-  const customCats = getCustomCategories(db)
+  const committedItems = await getCommittedItemsWithStatus(db, year, month)
+  const recurringMerchants = await getRecurringMerchantsWithStatus(db, year, month)
+  const rules = await getMerchantRules(db)
+  const customCats = await getCustomCategories(db)
   const knownCustomCategories = [...new Set([
     ...rules.map((r) => r.category),
     ...customCats.map((c) => c.name),

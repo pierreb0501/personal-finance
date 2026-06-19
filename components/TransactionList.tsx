@@ -11,6 +11,7 @@ type Transaction = {
   amount: number
   date: string
   merchantName: string | null
+  rawName?: string | null
   category: string
   customCategory: string | null
   pending: number

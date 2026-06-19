@@ -16,6 +16,7 @@ type Transaction = {
   amount: number
   date: string
   merchantName: string | null
+  rawName?: string | null
   category: string
   customCategory?: string | null
   ignored?: number
@@ -35,7 +36,7 @@ function merchantInitial(name: string | null, category: string): string {
 }
 
 export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRecurring }: Props) {
-  const displayName = tx.merchantName ?? tx.category
+  const displayName = tx.merchantName ?? tx.rawName ?? tx.category
   const initial = merchantInitial(tx.merchantName, tx.category)
   const ignored = Boolean(tx.ignored)
   const isCredit = tx.amount < 0
@@ -56,7 +57,12 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
         </span>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-[14px] font-semibold text-[var(--ink)] truncate leading-tight">{displayName}</p>
+            <p
+              className="text-[14px] font-semibold text-[var(--ink)] truncate leading-tight"
+              title={tx.rawName && tx.rawName !== displayName ? tx.rawName : undefined}
+            >
+              {displayName}
+            </p>
             {isCredit && !ignored && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--positive)] bg-[#e8f4ed] px-1.5 py-0.5 rounded-full shrink-0">
                 Received

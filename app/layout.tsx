@@ -24,12 +24,12 @@ export const metadata: Metadata = {
   description: 'Personal finance dashboard',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const brokenItems = getBrokenItems(db)
+  const brokenItems = await getBrokenItems(db)
 
   return (
     <html

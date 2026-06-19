@@ -8,10 +8,10 @@ import { HoldingRow } from '@/components/HoldingRow'
 import { EmptyState } from '@/components/EmptyState'
 import { BarChart2 } from 'lucide-react'
 
-export default function InvestmentsPage() {
-  const holdings = getAllHoldings(db)
-  const history = getAllSnapshotHistory(db)
-  const latest = getLatestSnapshot(db)
+export default async function InvestmentsPage() {
+  const holdings = await getAllHoldings(db)
+  const history = await getAllSnapshotHistory(db)
+  const latest = await getLatestSnapshot(db)
 
   const totalPortfolioValue = holdings.reduce((s, h) => s + h.institutionValue, 0)
   const totalCostBasis = holdings.reduce((s, h) => s + (h.costBasis ?? 0), 0)
