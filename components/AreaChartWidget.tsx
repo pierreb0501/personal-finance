@@ -4,6 +4,7 @@ import {
   AreaChart,
   Area,
   Tooltip,
+  YAxis,
   ResponsiveContainer,
 } from 'recharts'
 import { formatCAD } from '@/lib/format'
@@ -47,6 +48,7 @@ export function AreaChartWidget({ data, color, gradientId, height = 150 }: Props
               <stop offset="100%" stopColor={color} stopOpacity={0} />
             </linearGradient>
           </defs>
+          <YAxis hide domain={['auto', 'auto']} />
           <Tooltip
             content={<CustomTooltip />}
             cursor={{ stroke: color, strokeWidth: 1, strokeOpacity: 0.3 }}

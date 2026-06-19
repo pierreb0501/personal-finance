@@ -7,6 +7,7 @@ export const items = sqliteTable('items', {
   cursor: text('cursor'),
   institutionName: text('institution_name').notNull(),
   createdAt: integer('created_at').notNull(),
+  status: text('status').notNull().default('ok'), // 'ok' | 'login_required'
 })
 
 export const accounts = sqliteTable('accounts', {
@@ -95,6 +96,7 @@ export const manualRecurring = sqliteTable('manual_recurring', {
   dayOfMonth: integer('day_of_month').notNull(),
   avgAmount: real('avg_amount').notNull(),
   category: text('category').notNull(),
+  groupName: text('group_name'),
   createdAt: integer('created_at').notNull(),
 })
 
@@ -110,5 +112,11 @@ export const committedItems = sqliteTable('committed_items', {
   expectedDay: integer('expected_day'),  // nullable
   merchantName: text('merchant_name'),   // nullable, used for matching
   category: text('category').notNull(),
+  groupName: text('group_name'),
   createdAt: integer('created_at').notNull(),
+})
+
+export const recurringMerchantGroups = sqliteTable('recurring_merchant_groups', {
+  merchantName: text('merchant_name').primaryKey(),
+  groupName: text('group_name').notNull(),
 })

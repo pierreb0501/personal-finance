@@ -4,6 +4,13 @@ import { IgnoreButton } from './IgnoreButton'
 import { Repeat2 } from 'lucide-react'
 import type { CategoryRule } from '@/lib/categories'
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function formatDate(dateStr: string): string {
+  const [, m, d] = dateStr.split('-').map(Number)
+  return `${MONTHS[m - 1]} ${d}`
+}
+
 type Transaction = {
   id: string
   amount: number
@@ -85,12 +92,15 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
       </div>
 
       <div className="flex items-center gap-2.5 ml-4 shrink-0">
-        <p className={[
-          'text-[14px] font-semibold tabular-nums',
-          ignored ? 'line-through text-[var(--faint)]' : isCredit ? 'text-[var(--positive)]' : 'text-[var(--ink)]',
-        ].join(' ')}>
-          {isCredit ? '+' : '-'}{formatCAD(Math.abs(tx.amount))}
-        </p>
+        <div className="text-right">
+          <p className={[
+            'text-[14px] font-semibold tabular-nums',
+            ignored ? 'line-through text-[var(--faint)]' : isCredit ? 'text-[var(--positive)]' : 'text-[var(--ink)]',
+          ].join(' ')}>
+            {isCredit ? '+' : '-'}{formatCAD(Math.abs(tx.amount))}
+          </p>
+          <p className="text-[11px] text-[var(--faint)] mt-0.5">{formatDate(tx.date)}</p>
+        </div>
         <IgnoreButton txId={tx.id} ignored={ignored} />
       </div>
     </div>

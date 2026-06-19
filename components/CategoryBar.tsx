@@ -32,7 +32,7 @@ export function CategoryBar({ category, amount, share, color, limit }: Props) {
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{
-            width: `${Math.min(share * 100, 100)}%`,
+            width: amount <= 0 ? '0%' : `${Math.min((limit !== undefined && limit > 0 ? amount / limit : share) * 100, 100)}%`,
             backgroundColor: overBudget ? 'var(--negative)' : color,
           }}
         />

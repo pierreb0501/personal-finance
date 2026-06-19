@@ -1,15 +1,17 @@
 export const PALETTE = [
-  '#2E7D5B', // c1 — evergreen
-  '#C8923B', // c2 — amber
-  '#B5503C', // c3 — clay
-  '#4A6B8A', // c4 — slate blue
-  '#7A5A78', // c5 — plum
-  '#8AA17E', // c6 — sage
-  '#C9A66B', // c7 — sand
-  '#4E8C86', // c8 — teal
+  '#3B82F6', // c1 — blue
+  '#EF4444', // c2 — red
+  '#10B981', // c3 — emerald
+  '#F59E0B', // c4 — amber
+  '#8B5CF6', // c5 — violet
+  '#EC4899', // c6 — pink
+  '#06B6D4', // c7 — cyan
+  '#F97316', // c8 — orange
+  '#14B8A6', // c9 — teal
+  '#84CC16', // c10 — lime
 ] as const
 
-export const PALETTE_FALLBACK = '#A8A39A'
+export const PALETTE_FALLBACK = '#94A3B8'
 
 export const CATEGORY_LABELS: Record<string, string> = {
   FOOD_AND_DRINK:       'Food & Drink',
@@ -29,19 +31,19 @@ export const CATEGORY_LABELS: Record<string, string> = {
 }
 
 export const CATEGORY_COLORS: Record<string, string> = {
-  FOOD_AND_DRINK:       PALETTE[0],
-  GENERAL_MERCHANDISE:  PALETTE[6],
-  TRANSPORTATION:       PALETTE[3],
-  ENTERTAINMENT:        PALETTE[4],
-  RENT_AND_UTILITIES:   PALETTE[7],
-  LOAN_PAYMENTS:        PALETTE[3],
-  GENERAL_SERVICES:     PALETTE[5],
-  PERSONAL_CARE:        PALETTE[1],
-  MEDICAL:              PALETTE[2],
-  TRAVEL:               PALETTE[3],
-  TRANSFER_IN:          PALETTE[5],
-  TRANSFER_OUT:         PALETTE[4],
-  INCOME:               PALETTE[5],
+  FOOD_AND_DRINK:       PALETTE[0],  // blue
+  GENERAL_MERCHANDISE:  PALETTE[3],  // amber
+  TRANSPORTATION:       PALETTE[6],  // cyan
+  ENTERTAINMENT:        PALETTE[4],  // violet
+  RENT_AND_UTILITIES:   PALETTE[8],  // teal
+  LOAN_PAYMENTS:        PALETTE[1],  // red
+  GENERAL_SERVICES:     PALETTE[7],  // orange
+  PERSONAL_CARE:        PALETTE[5],  // pink
+  MEDICAL:              PALETTE[1],  // red
+  TRAVEL:               PALETTE[9],  // lime
+  TRANSFER_IN:          PALETTE[2],  // emerald
+  TRANSFER_OUT:         PALETTE[7],  // orange
+  INCOME:               PALETTE[2],  // emerald
   OTHER:                PALETTE_FALLBACK,
 }
 

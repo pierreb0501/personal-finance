@@ -10,21 +10,24 @@ type Props = {
 }
 
 export function DonutChart({ segments, size = 130 }: Props) {
-  const total = segments.reduce((s, seg) => s + seg.value, 0)
+  const circumference = 2 * Math.PI * 15.9 // ≈ 99.9
+
+  // A negative dashLen creates invalid strokeDasharray — the browser falls back to painting
+  // a full opaque circle in that segment's color, covering all other segments.
+  const positiveSegments = segments.filter((s) => s.value > 0)
+  const total = positiveSegments.reduce((s, seg) => s + seg.value, 0)
   if (total === 0) return null
 
-  // Build SVG strokes: each segment is a stroke-dasharray on a circle
-  // Using same approach as mockup: 42×42 viewBox, r=15.9, stroke-width=6
-  const circumference = 2 * Math.PI * 15.9 // ≈ 99.9
-  let offset = 25 // start at top (25 = circumference/4)
-
-  const arcs = segments.map((seg) => {
-    const pct = seg.value / total
-    const dashLen = pct * circumference
-    const arc = { ...seg, dashLen, dashGap: circumference - dashLen, offset }
-    offset -= dashLen
+  let cumulative = 0
+  const arcs = positiveSegments.map((seg) => {
+    const dashLen = (seg.value / total) * circumference
+    const arc = { ...seg, dashLen, cumulativeLen: cumulative }
+    cumulative += dashLen
     return arc
   })
+
+  // Legend shows all segments (including credits) so the user sees the full picture
+  const legendTotal = segments.reduce((s, seg) => s + Math.abs(seg.value), 0)
 
   return (
     <div className="flex items-center gap-5">
@@ -40,9 +43,9 @@ export function DonutChart({ segments, size = 130 }: Props) {
             fill="none"
             stroke={arc.color}
             strokeWidth="6"
-            strokeDasharray={`${arc.dashLen} ${arc.dashGap}`}
-            strokeDashoffset={arc.offset}
-            style={{ transition: 'stroke-dasharray 0.4s ease' }}
+            transform="rotate(-90 21 21)"
+            strokeDasharray={`${arc.dashLen} ${circumference - arc.dashLen}`}
+            strokeDashoffset={circumference - arc.cumulativeLen}
           />
         ))}
       </svg>
@@ -50,7 +53,7 @@ export function DonutChart({ segments, size = 130 }: Props) {
       {/* Legend */}
       <div className="flex flex-col gap-2.5 flex-1">
         {segments.map((seg) => {
-          const pct = total > 0 ? ((seg.value / total) * 100).toFixed(0) : '0'
+          const pct = legendTotal > 0 ? ((Math.abs(seg.value) / legendTotal) * 100).toFixed(0) : '0'
           return (
             <div key={seg.label} className="flex items-center justify-between text-[13.5px]">
               <span className="flex items-center gap-2 text-[var(--muted-text)]">
@@ -60,7 +63,9 @@ export function DonutChart({ segments, size = 130 }: Props) {
                 />
                 {seg.label}
               </span>
-              <span className="font-semibold tabular-nums text-[var(--ink)]">{pct}%</span>
+              <span className="font-semibold tabular-nums text-[var(--ink)]">
+                {seg.value < 0 ? '-' : ''}{pct}%
+              </span>
             </div>
           )
         })}

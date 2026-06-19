@@ -54,25 +54,17 @@ export function SpendingTrendChart({ months }: Props) {
       categoryTotals.set(b.category, (categoryTotals.get(b.category) ?? 0) + b.total)
     }
   }
-  const sorted = Array.from(categoryTotals.entries()).sort((a, b) => b[1] - a[1])
-  const topCategories = sorted.slice(0, 5).map(([c]) => c)
-  const hasOther = sorted.length > 5
+  const allKeys = Array.from(categoryTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([c]) => c)
 
   const data = months.map((m) => {
     const row: Record<string, string | number> = { label: m.label }
-    let otherTotal = 0
     for (const b of m.breakdown) {
-      if (topCategories.includes(b.category)) {
-        row[b.category] = ((row[b.category] as number) ?? 0) + b.total
-      } else {
-        otherTotal += b.total
-      }
+      row[b.category] = ((row[b.category] as number) ?? 0) + b.total
     }
-    if (hasOther && otherTotal > 0) row['Other'] = otherTotal
     return row
   })
-
-  const allKeys = [...topCategories, ...(hasOther ? ['Other'] : [])]
 
   return (
     <div className="mt-4 -mx-1" style={{ height: 220 }}>

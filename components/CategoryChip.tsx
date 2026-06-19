@@ -8,12 +8,13 @@ type Props = {
   txId: string
   merchantName: string | null
   category: string
+  isCredit?: boolean
   knownCustomCategories: string[]
 }
 
 const KNOWN_CATEGORIES = Object.keys(CATEGORY_LABELS)
 
-export function CategoryChip({ txId, merchantName, category: initialCategory, knownCustomCategories }: Props) {
+export function CategoryChip({ txId, merchantName, category: initialCategory, isCredit, knownCustomCategories }: Props) {
   const [open, setOpen] = useState(false)
   const [category, setCategory] = useState(initialCategory)
   const [search, setSearch] = useState('')
@@ -45,24 +46,29 @@ export function CategoryChip({ txId, merchantName, category: initialCategory, kn
     setOpen(false)
     if (merchantName && applyToAll) {
       await saveCategoryRule(merchantName, selected)
-    } else {
-      await saveTransactionCategory(txId, selected)
     }
+    await saveTransactionCategory(txId, selected)
     setSaving(false)
   }
 
   const color = getCategoryColor(category)
   const label = getCategoryLabel(category)
+  const isUnlabeledCredit = isCredit && category === 'TRANSFER_IN'
 
   return (
     <div className="relative inline-block" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={saving}
-        className="flex items-center gap-1.5 text-[12px] text-[var(--muted-text)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+        className={[
+          'flex items-center gap-1.5 text-[12px] transition-colors cursor-pointer',
+          isUnlabeledCredit
+            ? 'text-[var(--positive)] font-semibold hover:opacity-70'
+            : 'text-[var(--muted-text)] hover:text-[var(--ink)]',
+        ].join(' ')}
       >
-        <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ backgroundColor: color }} />
-        {label}
+        <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ backgroundColor: isUnlabeledCredit ? 'var(--positive)' : color }} />
+        {isUnlabeledCredit ? 'Label reimbursement…' : label}
       </button>
 
       {open && (
@@ -75,6 +81,13 @@ export function CategoryChip({ txId, merchantName, category: initialCategory, kn
             placeholder="Search or create…"
             className="w-full px-2.5 py-1.5 text-[13px] border border-[var(--hairline)] rounded-[8px] mb-1.5 outline-none focus:border-[var(--accent-dark)] bg-[var(--canvas)]"
           />
+
+          {/* Credit hint */}
+          {isCredit && (
+            <p className="text-[11px] text-[var(--positive)] px-1 pb-1.5">
+              Deducted from the chosen category
+            </p>
+          )}
 
           {/* Category list */}
           <div className="max-h-44 overflow-y-auto space-y-0.5">

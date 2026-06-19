@@ -3,6 +3,7 @@ import type { DB } from './db/index'
 import * as schema from './db/schema'
 import { db as defaultDb } from './db/index'
 import { plaidClient } from './plaid'
+import { applyAllCategoryRules } from './db/queries'
 
 type Item = typeof schema.items.$inferSelect
 
@@ -13,10 +14,18 @@ export async function syncAll(db: DB = defaultDb) {
   for (const item of allItems) {
     try {
       await syncItem(db, item)
+      if (item.status !== 'ok') {
+        db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
+      }
     } catch (err) {
       console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
+      const plaidErrorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
+      if (plaidErrorCode === 'ITEM_LOGIN_REQUIRED') {
+        db.update(schema.items).set({ status: 'login_required' }).where(eq(schema.items.id, item.id)).run()
+      }
     }
   }
+  applyAllCategoryRules(db)  // Apply saved merchant rules to any newly synced transactions
   writeSnapshot(db)  // Once, after all items, so snapshot reflects complete state
 }
 

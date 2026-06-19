@@ -10,6 +10,7 @@ import {
   getMerchantRules,
   getSetting,
   getAllAccounts,
+  getUnlabeledTransfers,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -19,7 +20,7 @@ import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
-import { PlusIcon, ArrowRight } from 'lucide-react'
+import { PlusIcon, ArrowRight, TriangleAlert } from 'lucide-react'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -41,14 +42,17 @@ export default function OverviewPage() {
   const history = getAllSnapshotHistory(db)
   const monthlySpend = getMonthlySpend(db)
   const allowance = Number(getSetting(db, 'allowance') ?? '3000')
+  const income = Number(getSetting(db, 'income') ?? '0')
   const categories = getCategoryBreakdown(db)
   const holdings = getAllHoldings(db)
   const transactions = getRecentTransactions(db, 4)
   const rules = getMerchantRules(db)
   const accounts = getAllAccounts(db)
+  const unlabeledTransfers = getUnlabeledTransfers(db)
 
   const spendRatio = allowance > 0 ? monthlySpend / allowance : 0
   const remaining = allowance - monthlySpend
+  const savingsRate = income > 0 ? ((income - monthlySpend) / income) * 100 : null
 
   // Allocation donut: by account type
   const investmentsVal = latest?.investmentsValue ?? 0
@@ -97,6 +101,22 @@ export default function OverviewPage() {
         </div>
       </div>
 
+      {/* Unlabeled transfers alert */}
+      {unlabeledTransfers.length > 0 && (
+        <Link
+          href="/spending"
+          className="flex items-center gap-2.5 px-4 py-3 mb-[18px] bg-[#fdf6e3] border border-[#e8d89a] rounded-[14px] hover:bg-[#faf0cc] transition-colors"
+        >
+          <TriangleAlert size={14} className="text-[#b08a00] shrink-0" />
+          <p className="text-[13px] font-semibold text-[#7a5f00]">
+            {unlabeledTransfers.length === 1
+              ? '1 transfer this month needs labeling'
+              : `${unlabeledTransfers.length} transfers this month need labeling`}
+          </p>
+          <ArrowRight size={13} className="text-[#b08a00] ml-auto shrink-0" />
+        </Link>
+      )}
+
       {/* Row 1: Net worth hero + This month */}
       <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
         <NetWorthHeroCard latest={latest} history={history} />
@@ -115,6 +135,14 @@ export default function OverviewPage() {
               {remaining >= 0 ? formatCAD(remaining) : `-${formatCAD(Math.abs(remaining))}`} left
             </span>
           </div>
+          {savingsRate !== null && (
+            <div className={[
+              'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-3',
+              savingsRate >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
+            ].join(' ')}>
+              {savingsRate >= 0 ? '▲' : '▼'} {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
+            </div>
+          )}
 
           <hr className="border-[var(--hairline)] my-4" />
 

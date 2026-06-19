@@ -8,14 +8,12 @@ import {
   getCategoryBudgets,
   getCustomCategories,
   getCategoryTrendMonths,
-  getRecurringMerchants,
   getCommittedItemsWithStatus,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
-import { IncomeEditor } from '@/components/IncomeEditor'
 import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
 import { CategoryBar } from '@/components/CategoryBar'
@@ -23,9 +21,8 @@ import { TransactionList } from '@/components/TransactionList'
 import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
-import { RecurringCard } from '@/components/RecurringCard'
-import { CommittedCard } from '@/components/CommittedCard'
 import { Receipt } from 'lucide-react'
+import AmexImportButton from '@/components/AmexImportButton'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -44,12 +41,17 @@ export default async function SpendingPage({
 
   const spend = getMonthlySpend(db, year, month)
   const allowance = Number(getSetting(db, 'allowance') ?? '3000')
-  const income = Number(getSetting(db, 'income') ?? '0')
   const categories = getCategoryBreakdown(db, year, month)
   const transactions = getTransactionsForMonth(db, year, month)
   const rules = getMerchantRules(db)
   const budgets = getCategoryBudgets(db, year, month)
   const budgetMap = new Map(budgets.map((b) => [b.category, b.planned]))
+  const committedItems = getCommittedItemsWithStatus(db, year, month)
+  const incomeItems = committedItems.filter((i) => i.type === 'income')
+  const incomeCategories = new Set(incomeItems.map((i) => i.category))
+  const expectedIncome = incomeItems.reduce((s, i) => s + i.expectedAmount, 0)
+  const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
+  const income = expectedIncome
 
   const remaining = allowance - spend
   const spendRatio = allowance > 0 ? spend / allowance : 0
@@ -68,20 +70,22 @@ export default async function SpendingPage({
     ? (projectedSavings / income) * 100
     : null
 
-  // Exclude negative-total categories (credits/refunds) — a negative dashLen breaks SVG rendering
+  // Exclude negative-total categories and recurring income categories from donut/breakdown
   const donutSegments = categories
-    .filter((c) => c.total > 0)
+    .filter((c) => c.total > 0 && !incomeCategories.has(c.category))
     .map((c) => ({
       label: getCategoryLabel(c.category),
       value: c.total,
       color: getCategoryColor(c.category),
     }))
 
-  const maxCategoryTotal = categories[0]?.total ?? 0
+  const spendingCategories = categories.filter((c) => !incomeCategories.has(c.category))
+  const maxCategoryTotal = spendingCategories[0]?.total ?? 0
 
-  const trendMonths = getCategoryTrendMonths(db, 6)
-  const recurringMerchants = getRecurringMerchants(db)
-  const committedItems = getCommittedItemsWithStatus(db, year, month)
+  const trendMonths = getCategoryTrendMonths(db, 6).map((m) => ({
+    ...m,
+    breakdown: m.breakdown.filter((b) => !incomeCategories.has(b.category)),
+  }))
   const customCats = getCustomCategories(db)
   const knownCustomCategories = [...new Set([
     ...rules.map((r) => r.category),
@@ -105,7 +109,10 @@ export default async function SpendingPage({
             {MONTH_NAMES[month - 1]} {year}
           </p>
         </div>
-        <MonthSelector year={year} month={month} />
+        <div className="flex items-center gap-3">
+          <AmexImportButton />
+          <MonthSelector year={year} month={month} />
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -119,7 +126,21 @@ export default async function SpendingPage({
 
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Income</p>
-          <IncomeEditor income={income} />
+          {income > 0 ? (
+            <>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--ink)]">
+                {formatCAD(confirmedIncome > 0 ? confirmedIncome : income)}
+              </p>
+              {confirmedIncome > 0 && confirmedIncome < income && (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1">of {formatCAD(income)} expected</p>
+              )}
+              {confirmedIncome === 0 && (
+                <p className="text-[12px] text-[var(--faint)] mt-1">expected</p>
+              )}
+            </>
+          ) : (
+            <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--faint)]">—</p>
+          )}
         </div>
 
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
@@ -208,7 +229,7 @@ export default async function SpendingPage({
       )}
 
       {/* Category breakdown */}
-      {categories.length === 0 ? (
+      {spendingCategories.length === 0 ? (
         <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
           <EmptyState
             icon={Receipt}
@@ -231,7 +252,7 @@ export default async function SpendingPage({
               Category breakdown
             </h3>
             <div className="space-y-4">
-              {categories.map((cat) => (
+              {spendingCategories.map((cat) => (
                 <CategoryBar
                   key={cat.category}
                   category={cat.category}
@@ -272,16 +293,9 @@ export default async function SpendingPage({
             transactions={transactions}
             rules={rules}
             knownCustomCategories={knownCustomCategories}
-            recurringMerchantNames={new Set(recurringMerchants.map((m) => m.merchantName))}
           />
         </div>
       )}
-
-      {/* Monthly Commitments */}
-      <CommittedCard items={committedItems} knownCustomCategories={knownCustomCategories} />
-
-      {/* Recurring charges — below transactions */}
-      <RecurringCard merchants={recurringMerchants} knownCustomCategories={knownCustomCategories} />
     </div>
   )
 }

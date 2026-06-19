@@ -74,6 +74,14 @@ export function getAllAccounts(db: DB) {
     .all()
 }
 
+export function getBrokenItems(db: DB) {
+  return db
+    .select({ id: schema.items.id, institutionName: schema.items.institutionName })
+    .from(schema.items)
+    .where(eq(schema.items.status, 'login_required'))
+    .all()
+}
+
 export function getLastSyncedAt(db: DB): number | null {
   const result = db
     .select({ maxUpdated: sql<number>`MAX(${schema.accounts.updatedAt})` })
@@ -484,6 +492,7 @@ export function getRecurringMerchants(db: DB) {
     monthCount: number
     dayOfMonth: number
     isManual: boolean
+    groupName: string | null
   }[] = []
 
   for (const [merchantName, data] of merchantMap.entries()) {
@@ -516,7 +525,7 @@ export function getRecurringMerchants(db: DB) {
       .flatMap(m => m.amounts.filter((_, i) => Math.abs(m.days[i] - bestDay) <= 2))
     const avgAmount = matchingAmounts.reduce((s, a) => s + a, 0) / matchingAmounts.length
 
-    result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false })
+    result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false, groupName: null })
   }
 
   // Merge manual entries (never dismissed)
@@ -528,6 +537,7 @@ export function getRecurringMerchants(db: DB) {
       monthCount: 0,
       dayOfMonth: m.dayOfMonth,
       isManual: true,
+      groupName: m.groupName ?? null,
     })
   }
 
@@ -691,7 +701,10 @@ export type CommittedItemWithStatus = {
   expectedDay: number | null
   merchantName: string | null
   category: string
+  groupName: string | null
   confirmedAmount: number | null
+  confirmedCount: number
+  confirmedAccountLabel: string | null
 }
 
 export function getCommittedItemsWithStatus(db: DB, year: number, month: number): CommittedItemWithStatus[] {
@@ -703,8 +716,14 @@ export function getCommittedItemsWithStatus(db: DB, year: number, month: number)
       id: schema.transactions.id,
       amount: schema.transactions.amount,
       merchantName: schema.transactions.merchantName,
+      category: schema.transactions.category,
+      customCategory: schema.transactions.customCategory,
+      accountName: schema.accounts.name,
+      institutionName: schema.items.institutionName,
     })
     .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
     .where(
       and(
         gte(schema.transactions.date, start),
@@ -717,25 +736,48 @@ export function getCommittedItemsWithStatus(db: DB, year: number, month: number)
 
   return items.map((item) => {
     const isIncome = item.type === 'income'
-    const candidates = txs.filter((tx) => {
-      const rightDirection = isIncome ? tx.amount < 0 : tx.amount > 0
-      if (!rightDirection) return false
-      const absAmount = Math.abs(tx.amount)
-      // Income: ±30%. Expenses: +35%/-30% (bills can overshoot slightly).
-      const withinRange = isIncome
-        ? absAmount >= item.expectedAmount * 0.7 && absAmount <= item.expectedAmount * 1.3
-        : absAmount >= item.expectedAmount * 0.7 && absAmount <= item.expectedAmount * 1.35
-      if (!withinRange) return false
-      if (item.merchantName) {
-        return tx.merchantName?.toLowerCase().includes(item.merchantName.toLowerCase()) ?? false
-      }
-      return true
+    const isInDirection = (tx: { amount: number }) => isIncome ? tx.amount < 0 : tx.amount > 0
+    const txEffectiveCategory = (tx: { category: string; customCategory: string | null }) =>
+      tx.customCategory ?? tx.category
+
+    // Step 1: match by category label (the primary signal — the user tags recurring
+    // transactions with dedicated labels like "Rent", "Income", "Tax Return").
+    const categoryMatched = txs.filter((tx) => {
+      if (!isInDirection(tx)) return false
+      return txEffectiveCategory(tx) === item.category
     })
 
-    const best = candidates.sort((a, b) =>
-      Math.abs(Math.abs(a.amount) - item.expectedAmount) - Math.abs(Math.abs(b.amount) - item.expectedAmount)
-    )[0] ?? null
+    // Step 2: if a keyword is set, use it to narrow the category matches (handles
+    // multiple items sharing the same category, e.g. two income sources both labeled
+    // "Income"). Fall back to all category matches if keyword filters to zero.
+    let matched = categoryMatched
+    if (item.merchantName && categoryMatched.length > 0) {
+      const kw = item.merchantName.toLowerCase()
+      const keywordFiltered = categoryMatched.filter(
+        (tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false
+      )
+      if (keywordFiltered.length > 0) matched = keywordFiltered
+    }
 
+    if (matched.length > 0) {
+      const total = matched.reduce((s, tx) => s + Math.abs(tx.amount), 0)
+      const label = shortAccountLabel(matched[0].accountName ?? '', matched[0].institutionName ?? '')
+      return {
+        id: item.id,
+        name: item.name,
+        type: item.type as 'income' | 'expense',
+        expectedAmount: item.expectedAmount,
+        expectedDay: item.expectedDay,
+        merchantName: item.merchantName,
+        category: item.category,
+        groupName: item.groupName ?? null,
+        confirmedAmount: total,
+        confirmedCount: matched.length,
+        confirmedAccountLabel: label,
+      }
+    }
+
+    // Step 3: no category match — nothing confirmed this month.
     return {
       id: item.id,
       name: item.name,
@@ -744,7 +786,125 @@ export function getCommittedItemsWithStatus(db: DB, year: number, month: number)
       expectedDay: item.expectedDay,
       merchantName: item.merchantName,
       category: item.category,
-      confirmedAmount: best ? Math.abs(best.amount) : null,
+      groupName: item.groupName ?? null,
+      confirmedAmount: null,
+      confirmedCount: 0,
+      confirmedAccountLabel: null,
     }
   })
+}
+
+export type RecurringMerchantWithStatus = {
+  merchantName: string
+  category: string
+  avgAmount: number
+  dayOfMonth: number
+  isManual: boolean
+  groupName: string | null
+  confirmedAmount: number | null
+  confirmedDate: string | null
+  confirmedAccountLabel: string | null
+}
+
+export function getRecurringMerchantsWithStatus(db: DB, year: number, month: number): RecurringMerchantWithStatus[] {
+  const merchants = getRecurringMerchants(db)
+  const { start, end } = monthBounds(year, month)
+
+  // Load group assignments for auto-detected merchants
+  const groupRows = db.select().from(schema.recurringMerchantGroups).all()
+  const groupMap = new Map(groupRows.map((r) => [r.merchantName, r.groupName]))
+
+  const txs = db
+    .select({
+      merchantName: schema.transactions.merchantName,
+      amount: schema.transactions.amount,
+      date: schema.transactions.date,
+      category: schema.transactions.category,
+      customCategory: schema.transactions.customCategory,
+      accountName: schema.accounts.name,
+      institutionName: schema.items.institutionName,
+    })
+    .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
+    .where(
+      and(
+        gte(schema.transactions.date, start),
+        sql`${schema.transactions.date} <= ${end}`,
+        sql`${schema.transactions.amount} > 0`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      )
+    )
+    .all()
+
+  return merchants.map((m) => {
+    const txEffectiveCategory = (tx: { category: string; customCategory: string | null }) =>
+      tx.customCategory ?? tx.category
+
+    // Primary: match by category label.
+    const categoryMatched = txs.filter((tx) => txEffectiveCategory(tx) === m.category)
+
+    // Tiebreaker: if keyword is set and multiple category matches exist, narrow by name.
+    let pool = categoryMatched
+    if (categoryMatched.length > 0 && m.merchantName) {
+      const kw = m.merchantName.toLowerCase()
+      const nameFiltered = categoryMatched.filter(
+        (tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false
+      )
+      if (nameFiltered.length > 0) pool = nameFiltered
+    }
+
+    const best = pool.sort((a, b) =>
+      Math.abs(a.amount - m.avgAmount) - Math.abs(b.amount - m.avgAmount)
+    )[0] ?? null
+
+    const groupName = m.isManual
+      ? (m.groupName ?? null)
+      : (groupMap.get(m.merchantName) ?? null)
+
+    return {
+      merchantName: m.merchantName,
+      category: m.category,
+      avgAmount: m.avgAmount,
+      dayOfMonth: m.dayOfMonth,
+      isManual: m.isManual,
+      groupName,
+      confirmedAmount: best ? best.amount : null,
+      confirmedDate: best ? best.date : null,
+      confirmedAccountLabel: best
+        ? shortAccountLabel(best.accountName ?? '', best.institutionName ?? '')
+        : null,
+    }
+  })
+}
+
+export function setCommittedItemGroup(db: DB, id: string, groupName: string | null): void {
+  db.update(schema.committedItems)
+    .set({ groupName: groupName ?? null })
+    .where(eq(schema.committedItems.id, id))
+    .run()
+}
+
+export function setManualRecurringGroup(db: DB, merchantName: string, groupName: string | null): void {
+  db.update(schema.manualRecurring)
+    .set({ groupName: groupName ?? null })
+    .where(eq(schema.manualRecurring.merchantName, merchantName))
+    .run()
+}
+
+export function setAutoRecurringGroup(db: DB, merchantName: string, groupName: string | null): void {
+  if (groupName === null) {
+    db.delete(schema.recurringMerchantGroups)
+      .where(eq(schema.recurringMerchantGroups.merchantName, merchantName))
+      .run()
+  } else {
+    db.insert(schema.recurringMerchantGroups)
+      .values({ merchantName, groupName })
+      .onConflictDoUpdate({
+        target: schema.recurringMerchantGroups.merchantName,
+        set: { groupName },
+      })
+      .run()
+  }
 }

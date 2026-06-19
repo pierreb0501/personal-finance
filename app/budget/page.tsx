@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { getCategoryBreakdown, getCategoryBudgets, getMerchantRules } from '@/lib/db/queries'
+import { getCategoryBreakdown, getCategoryBudgets, getMerchantRules, getCustomCategories, seedBudgetFromPrevious } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { BudgetRow } from '@/components/BudgetRow'
@@ -21,9 +21,16 @@ export default async function BudgetPage({
   const year = yearStr ? Number(yearStr) : now.getFullYear()
   const month = monthStr ? Number(monthStr) : now.getMonth() + 1
 
-  const budgets = getCategoryBudgets(db, year, month)
+  // Auto-seed from previous month on first visit
+  let budgets = getCategoryBudgets(db, year, month)
+  if (budgets.length === 0) {
+    seedBudgetFromPrevious(db, year, month)
+    budgets = getCategoryBudgets(db, year, month)
+  }
+
   const breakdown = getCategoryBreakdown(db, year, month)
   const rules = getMerchantRules(db)
+  const customCats = getCustomCategories(db)
 
   const plannedMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const spendMap = new Map(breakdown.map((c) => [c.category, c.total]))
@@ -49,7 +56,12 @@ export default async function BudgetPage({
   const totalSpent = allCategories.reduce((s, c) => s + (spendMap.get(c) ?? 0), 0)
 
   // Categories not yet planned this month
-  const knownCustomCategories = [...new Set(rules.map((r) => r.category))]
+  const knownCustomCategories = [
+    ...new Set([
+      ...rules.map((r) => r.category),
+      ...customCats.map((c) => c.name),
+    ])
+  ]
   const allKnown = [...new Set([...Object.keys(CATEGORY_LABELS), ...knownCustomCategories])]
   const unplannedCategories = allKnown.filter((c) => !plannedMap.has(c))
 

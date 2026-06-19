@@ -18,6 +18,9 @@ import {
   updateManualRecurringCategory,
   addCommittedItem as dbAddCommittedItem,
   deleteCommittedItem as dbDeleteCommittedItem,
+  setCommittedItemGroup as dbSetCommittedItemGroup,
+  setManualRecurringGroup as dbSetManualRecurringGroup,
+  setAutoRecurringGroup as dbSetAutoRecurringGroup,
 } from '@/lib/db/queries'
 
 export async function saveCategoryRule(merchantName: string, category: string): Promise<void> {
@@ -89,16 +92,19 @@ export async function deleteCustomCategory(id: string): Promise<void> {
 export async function dismissRecurring(merchantName: string): Promise<void> {
   dismissRecurringMerchant(db, merchantName)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
 }
 
 export async function addRecurring(merchantName: string, dayOfMonth: number, avgAmount: number, category: string): Promise<void> {
   addManualRecurring(db, merchantName.trim(), dayOfMonth, avgAmount, category)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
 }
 
 export async function removeManualRecurring(merchantName: string): Promise<void> {
   deleteManualRecurring(db, merchantName)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
 }
 
 export async function updateRecurringCategory(merchantName: string, category: string, isManual: boolean): Promise<void> {
@@ -108,6 +114,7 @@ export async function updateRecurringCategory(merchantName: string, category: st
   // Always save a category rule so future transactions from this merchant get the category
   upsertCategoryRule(db, merchantName, category)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
   revalidatePath('/budget')
 }
 
@@ -120,6 +127,7 @@ export async function addCommittedIncomeItem(
 ): Promise<void> {
   dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
 }
 
 export async function addCommittedExpenseItem(
@@ -131,9 +139,26 @@ export async function addCommittedExpenseItem(
 ): Promise<void> {
   dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
 }
 
 export async function deleteCommittedItem(id: string): Promise<void> {
   dbDeleteCommittedItem(db, id)
   revalidatePath('/spending')
+  revalidatePath('/recurring')
+}
+
+export async function setItemGroup(id: string, groupName: string | null): Promise<void> {
+  dbSetCommittedItemGroup(db, id, groupName)
+  revalidatePath('/recurring')
+  revalidatePath('/spending')
+}
+
+export async function setMerchantGroup(merchantName: string, groupName: string | null, isManual: boolean): Promise<void> {
+  if (isManual) {
+    dbSetManualRecurringGroup(db, merchantName, groupName)
+  } else {
+    dbSetAutoRecurringGroup(db, merchantName, groupName)
+  }
+  revalidatePath('/recurring')
 }

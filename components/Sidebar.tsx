@@ -8,11 +8,11 @@ export function Sidebar() {
       <aside className="hidden md:flex w-[248px] shrink-0 flex-col bg-[var(--surface-warm)] border-r border-[var(--hairline)] h-screen sticky top-0 px-[18px] py-[26px]">
         {/* Brand */}
         <div className="flex items-center gap-2.5 px-2.5 pb-[22px]">
-          <span className="w-[30px] h-[30px] rounded-[9px] bg-[var(--accent-dark)] flex items-center justify-center text-white font-[family-name:var(--font-fraunces)] text-[18px]">
-            P
+          <span className="w-[30px] h-[30px] rounded-[9px] bg-[#1a7a4a] flex items-center justify-center text-white font-bold text-[18px]">
+            $
           </span>
           <span className="font-[family-name:var(--font-fraunces)] font-medium text-[19px] tracking-tight">
-            Ledger
+            Personal Finance
           </span>
         </div>
 

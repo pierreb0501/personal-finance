@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { formatCAD } from '@/lib/format'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
 import { Repeat2, X, Plus, Check } from 'lucide-react'
-import { dismissRecurring, addRecurring, removeManualRecurring } from '@/app/actions'
+import { dismissRecurring, addRecurring, removeManualRecurring, updateRecurringCategory } from '@/app/actions'
 
 type RecurringMerchant = {
   merchantName: string
@@ -24,6 +24,58 @@ function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd']
   const v = n % 100
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0])
+}
+
+function CategoryPicker({ merchantName, category, isManual, knownCustomCategories }: {
+  merchantName: string
+  category: string
+  isManual: boolean
+  knownCustomCategories: string[]
+}) {
+  const [editing, setEditing] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [current, setCurrent] = useState(category)
+
+  const allCategories = [
+    ...Object.keys(CATEGORY_LABELS),
+    ...knownCustomCategories.filter(c => !CATEGORY_LABELS[c]),
+  ]
+
+  async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const next = e.target.value
+    setCurrent(next)
+    setPending(true)
+    setEditing(false)
+    await updateRecurringCategory(merchantName, next, isManual)
+    setPending(false)
+  }
+
+  if (editing) {
+    return (
+      <select
+        autoFocus
+        value={current}
+        onChange={handleChange}
+        onBlur={() => setEditing(false)}
+        className="text-[12px] border border-[var(--hairline)] rounded-[6px] px-1.5 py-0.5 bg-white text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--ink)] focus:ring-opacity-20"
+      >
+        {allCategories.map(cat => (
+          <option key={cat} value={cat}>{getCategoryLabel(cat)}</option>
+        ))}
+      </select>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      disabled={pending}
+      className="text-[12px] text-left hover:underline cursor-pointer disabled:opacity-50"
+      style={{ color: getCategoryColor(current) }}
+    >
+      {getCategoryLabel(current)}
+    </button>
+  )
 }
 
 function DeleteButton({ merchantName, isManual }: { merchantName: string; isManual: boolean }) {
@@ -203,9 +255,12 @@ export function RecurringCard({ merchants, knownCustomCategories }: Props) {
                     </span>
                   )}
                 </div>
-                <p className="text-[12px]" style={{ color: getCategoryColor(m.category) }}>
-                  {getCategoryLabel(m.category)}
-                </p>
+                <CategoryPicker
+                  merchantName={m.merchantName}
+                  category={m.category}
+                  isManual={m.isManual}
+                  knownCustomCategories={knownCustomCategories}
+                />
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0 ml-4">

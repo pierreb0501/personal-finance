@@ -8,14 +8,18 @@ import {
   CreditCard,
   BarChart2,
   Target,
+  Tag,
+  Repeat2,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { label: 'Overview',    href: '/',            icon: LayoutGrid },
   { label: 'Net Worth',   href: '/net-worth',   icon: TrendingUp },
   { label: 'Spending',    href: '/spending',    icon: CreditCard },
+  { label: 'Recurring',   href: '/recurring',   icon: Repeat2 },
   { label: 'Budget',      href: '/budget',      icon: Target },
   { label: 'Investments', href: '/investments', icon: BarChart2 },
+  { label: 'Categories',  href: '/categories',  icon: Tag },
 ]
 
 export function NavLinks() {
