@@ -23,6 +23,8 @@ import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
 import { PlusIcon, ArrowRight, TriangleAlert } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 function greeting(): string {
   const h = new Date().getHours()
   if (h < 12) return 'Good morning'

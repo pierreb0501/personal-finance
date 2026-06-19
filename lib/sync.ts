@@ -13,6 +13,7 @@ type Item = typeof schema.items.$inferSelect
 export async function syncAll(db: DB = defaultDb) {
   const allItems = await db.select().from(schema.items).all()
   for (const item of allItems) {
+    if (item.id === MANUAL_IMPORT_ITEM_ID) continue
     try {
       await syncItem(db, item)
       if (item.status !== 'ok') {

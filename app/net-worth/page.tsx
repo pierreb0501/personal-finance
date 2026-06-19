@@ -7,6 +7,8 @@ import { AccountRow } from '@/components/AccountRow'
 import { EmptyState } from '@/components/EmptyState'
 import { Landmark } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function NetWorthPage() {
   const latest = await getLatestSnapshot(db)
   const history = await getAllSnapshotHistory(db)

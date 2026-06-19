@@ -8,6 +8,8 @@ import { HoldingRow } from '@/components/HoldingRow'
 import { EmptyState } from '@/components/EmptyState'
 import { BarChart2 } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function InvestmentsPage() {
   const holdings = await getAllHoldings(db)
   const history = await getAllSnapshotHistory(db)
