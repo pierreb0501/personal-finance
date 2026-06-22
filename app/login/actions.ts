@@ -6,7 +6,10 @@ import { db } from '@/lib/db'
 import { createSession, deleteSession, verifyPassword } from '@/lib/session'
 import { isLoginRateLimited, recordFailedLoginAttempt, clearLoginAttempts } from '@/lib/db/queries'
 
-export type LoginState = { error: string | null }
+export type LoginState =
+  | { kind: 'idle' }
+  | { kind: 'error'; message: string }
+  | { kind: 'locked'; retryAfterSeconds: number }
 
 async function getClientIp(): Promise<string> {
   const h = await headers()
@@ -20,13 +23,14 @@ async function getClientIp(): Promise<string> {
 export async function login(_prevState: LoginState, formData: FormData): Promise<LoginState> {
   const password = formData.get('password')
   if (typeof password !== 'string' || password.length === 0) {
-    return { error: 'Password is required' }
+    return { kind: 'error', message: 'Password is required' }
   }
 
   const ip = await getClientIp()
 
-  if (await isLoginRateLimited(db, ip)) {
-    return { error: 'Too many attempts. Please try again in a few minutes.' }
+  const rateLimitStatus = await isLoginRateLimited(db, ip)
+  if (rateLimitStatus.limited) {
+    return { kind: 'locked', retryAfterSeconds: rateLimitStatus.retryAfterSeconds }
   }
 
   let valid: boolean
@@ -34,12 +38,12 @@ export async function login(_prevState: LoginState, formData: FormData): Promise
     valid = verifyPassword(password)
   } catch (err) {
     console.error('Login failed — server misconfiguration:', (err as Error).message)
-    return { error: 'Server is not configured for login. Contact the administrator.' }
+    return { kind: 'error', message: 'Server is not configured for login. Contact the administrator.' }
   }
 
   if (!valid) {
     await recordFailedLoginAttempt(db, ip)
-    return { error: 'Incorrect password' }
+    return { kind: 'error', message: 'Incorrect password' }
   }
 
   await clearLoginAttempts(db, ip)
