@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Personal Finance
 
-## Getting Started
+A personal finance dashboard built with Next.js: bank/credit/investment account syncing via Plaid, Amex CSV import, budget planning, recurring charge detection, and net worth tracking. Single-tenant — all data is shared across whoever can log in, gated behind one shared password.
 
-First, run the development server:
+## Setup
+
+1. Copy `.env.example` to `.env.local` and fill in:
+   - **Plaid** credentials from the [Plaid dashboard](https://dashboard.plaid.com/team/keys)
+   - **Turso** database URL/token from [turso.tech](https://turso.tech)
+   - `SESSION_SECRET` — generate with `openssl rand -base64 32`
+   - `APP_PASSWORD` — the password used to log into the app (see [Auth](#auth) below)
+2. `npm install`
+3. `npm run dev` and open [http://localhost:3000](http://localhost:3000)
+
+Database migrations run automatically on first query (see `lib/db/index.ts`); no manual migrate step needed in development.
+
+## Auth
+
+The whole app sits behind a single shared password (`APP_PASSWORD`) — there's no per-user accounts system; everyone who logs in sees the same data. This is intentional for now (a household/personal app), not a placeholder for something more — see `lib/session.ts`, `lib/dal.ts`, and `proxy.ts` if that changes.
+
+Sessions are signed JWTs (`jose`) in an HttpOnly, Secure (in production), SameSite=Lax cookie, 30-day expiry. Login attempts are rate-limited per IP (DB-backed, so it holds across serverless cold starts). Route Handlers under `/api` additionally verify the `Origin` header on state-changing requests, since — unlike Server Actions — they get no automatic CSRF protection from Next.js.
+
+**Before deploying anywhere reachable by others:** change `APP_PASSWORD` to something strong, and make sure `SESSION_SECRET` is a real random value (not committed anywhere).
+
+## Testing
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm test          # Jest — db queries, sync logic, Amex CSV parser, session auth
+npx tsc --noEmit   # typecheck
+npx next build     # production build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+CI (`.github/workflows/ci.yml`) runs all three on every push/PR to `main`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js 16 (App Router) · Drizzle ORM · Turso (libsql) · Plaid · Tailwind · Recharts
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See `AGENTS.md` for a note on this Next.js version's docs being bundled locally — check `node_modules/next/dist/docs/` before relying on training-data assumptions about App Router APIs (some conventions, like `middleware.ts` → `proxy.ts`, have changed).

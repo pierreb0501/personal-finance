@@ -1108,3 +1108,39 @@ export async function setAutoRecurringGroup(db: DB, merchantName: string, groupN
       .run()
   }
 }
+
+// ─── Login rate limiting ──────────────────────────────────────────────────────
+
+const LOGIN_ATTEMPT_WINDOW_MS = 10 * 60 * 1000 // 10 minutes
+const LOGIN_ATTEMPT_MAX = 8
+
+// Returns true if `ip` is currently allowed to attempt a login. Does not
+// itself record an attempt — call recordFailedLoginAttempt() after a failed
+// password check.
+export async function isLoginRateLimited(db: DB, ip: string): Promise<boolean> {
+  const row = await db.select().from(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).get()
+  if (!row) return false
+  const windowExpired = Date.now() - row.windowStart > LOGIN_ATTEMPT_WINDOW_MS
+  if (windowExpired) return false
+  return row.count >= LOGIN_ATTEMPT_MAX
+}
+
+export async function recordFailedLoginAttempt(db: DB, ip: string): Promise<void> {
+  const now = Date.now()
+  const row = await db.select().from(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).get()
+  const windowExpired = !row || now - row.windowStart > LOGIN_ATTEMPT_WINDOW_MS
+
+  await db.insert(schema.loginAttempts)
+    .values({ ip, count: 1, windowStart: now })
+    .onConflictDoUpdate({
+      target: schema.loginAttempts.ip,
+      set: windowExpired
+        ? { count: 1, windowStart: now }
+        : { count: sql`${schema.loginAttempts.count} + 1` },
+    })
+    .run()
+}
+
+export async function clearLoginAttempts(db: DB, ip: string): Promise<void> {
+  await db.delete(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).run()
+}

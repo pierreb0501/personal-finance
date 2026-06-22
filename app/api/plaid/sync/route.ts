@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { items } from '@/lib/db/schema'
 import { syncAll } from '@/lib/sync'
+import { requireAuth, verifySameOrigin } from '@/lib/api-auth'
 
 export async function POST(req: NextRequest) {
+  const authError = await requireAuth()
+  if (authError) return authError
+  const csrfError = verifySameOrigin(req)
+  if (csrfError) return csrfError
+
   try {
     const { force } = await req.json().catch(() => ({ force: false }))
 

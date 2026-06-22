@@ -3,8 +3,14 @@ import { plaidClient } from '@/lib/plaid'
 import { db } from '@/lib/db'
 import { items } from '@/lib/db/schema'
 import { syncAll } from '@/lib/sync'
+import { requireAuth, verifySameOrigin } from '@/lib/api-auth'
 
 export async function POST(req: NextRequest) {
+  const authError = await requireAuth()
+  if (authError) return authError
+  const csrfError = verifySameOrigin(req)
+  if (csrfError) return csrfError
+
   try {
     const { public_token, institution_name } = await req.json()
 

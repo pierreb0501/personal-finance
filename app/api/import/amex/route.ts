@@ -4,6 +4,9 @@ import { items, accounts, transactions } from '@/lib/db/schema'
 import { applyAllCategoryRules } from '@/lib/db/queries'
 import { revalidatePath } from 'next/cache'
 import { MANUAL_IMPORT_ITEM_ID as MANUAL_ITEM_ID, AMEX_CSV_ACCOUNT_ID as AMEX_ACCOUNT_ID } from '@/lib/constants'
+import { requireAuth, verifySameOrigin } from '@/lib/api-auth'
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB — generous for a CSV statement export
 
 // Thrown for problems with the uploaded file itself — safe to show to the user.
 // Anything else (DB errors, etc.) is logged server-side and replaced with a
@@ -159,10 +162,18 @@ export function parseAmexCsv(text: string): AmexRow[] {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = await requireAuth()
+  if (authError) return authError
+  const csrfError = verifySameOrigin(req)
+  if (csrfError) return csrfError
+
   try {
     const formData = await req.formData()
     const file = formData.get('file') as File | null
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json({ error: 'File too large (max 10MB)' }, { status: 413 })
+    }
 
     const text = await file.text()
     const rows = parseAmexCsv(text)

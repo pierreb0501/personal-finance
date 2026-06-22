@@ -1,5 +1,7 @@
+import { LogOut } from 'lucide-react'
 import { NavLinks } from './NavLinks'
 import { SyncStatus } from './SyncStatus'
+import { logout } from '@/app/login/actions'
 
 export function Sidebar() {
   return (
@@ -26,10 +28,19 @@ export function Sidebar() {
             <span className="w-[34px] h-[34px] rounded-full bg-[#dfece5] text-[var(--accent-dark)] flex items-center justify-center font-bold text-[13px]">
               PE
             </span>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-[13.5px] font-semibold leading-tight">Pierre E.</p>
               <p className="text-[12px] text-[var(--faint)]">Personal</p>
             </div>
+            <form action={logout}>
+              <button
+                type="submit"
+                title="Sign out"
+                className="p-1.5 rounded-[8px] text-[var(--faint)] hover:text-[var(--negative)] hover:bg-[#f6e8e4] transition-colors cursor-pointer"
+              >
+                <LogOut size={15} />
+              </button>
+            </form>
           </div>
         </div>
       </aside>

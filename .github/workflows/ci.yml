@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values: lib/plaid.ts validates these are present at import time
+      # (fail-fast), but nothing in tests/build actually calls out to Plaid
+      # or Turso — db client creation is lazy (see lib/db/index.ts) and the
+      # Plaid client object isn't used until a real request hits an API route.
+      PLAID_CLIENT_ID: dummy
+      PLAID_SECRET: dummy
+      PLAID_ENV: sandbox
+      TURSO_DATABASE_URL: libsql://dummy.turso.io
+      TURSO_AUTH_TOKEN: dummy
+      SESSION_SECRET: ci-dummy-session-secret-at-least-32-chars-long
+      APP_PASSWORD: ci-dummy-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx next build

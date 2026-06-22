@@ -5,6 +5,7 @@ import { items } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { CountryCode, Products } from 'plaid'
 import { isAxiosError } from 'axios'
+import { requireAuth, verifySameOrigin } from '@/lib/api-auth'
 
 // Plaid rejects link_token/create with INVALID_FIELD if redirect_uri isn't
 // registered in the dashboard for this environment. Retry without it so
@@ -19,6 +20,11 @@ function isUnregisteredRedirectUriError(err: unknown): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  const authError = await requireAuth()
+  if (authError) return authError
+  const csrfError = verifySameOrigin(req)
+  if (csrfError) return csrfError
+
   try {
     const { itemId } = await req.json().catch(() => ({ itemId: undefined }))
 

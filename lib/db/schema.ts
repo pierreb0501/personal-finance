@@ -127,3 +127,12 @@ export const recurringMerchantGroups = sqliteTable('recurring_merchant_groups', 
   merchantName: text('merchant_name').primaryKey(),
   groupName: text('group_name').notNull(),
 })
+
+// Tracks failed login attempts per source IP for rate limiting. DB-backed
+// (rather than in-memory) so the limit holds even across serverless cold
+// starts / multiple instances.
+export const loginAttempts = sqliteTable('login_attempts', {
+  ip: text('ip').primaryKey(),
+  count: integer('count').notNull().default(0),
+  windowStart: integer('window_start').notNull(),
+})
