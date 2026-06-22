@@ -1114,15 +1114,24 @@ export async function setAutoRecurringGroup(db: DB, merchantName: string, groupN
 const LOGIN_ATTEMPT_WINDOW_MS = 10 * 60 * 1000 // 10 minutes
 const LOGIN_ATTEMPT_MAX = 8
 
-// Returns true if `ip` is currently allowed to attempt a login. Does not
-// itself record an attempt — call recordFailedLoginAttempt() after a failed
-// password check.
-export async function isLoginRateLimited(db: DB, ip: string): Promise<boolean> {
+export type LoginRateLimitStatus =
+  | { limited: false }
+  | { limited: true; retryAfterSeconds: number }
+
+// Returns whether `ip` is currently allowed to attempt a login, and if not,
+// how many seconds remain in the lockout window (so the UI can show a
+// countdown). Does not itself record an attempt — call
+// recordFailedLoginAttempt() after a failed password check.
+export async function isLoginRateLimited(db: DB, ip: string): Promise<LoginRateLimitStatus> {
   const row = await db.select().from(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).get()
-  if (!row) return false
-  const windowExpired = Date.now() - row.windowStart > LOGIN_ATTEMPT_WINDOW_MS
-  if (windowExpired) return false
-  return row.count >= LOGIN_ATTEMPT_MAX
+  if (!row) return { limited: false }
+
+  const elapsedMs = Date.now() - row.windowStart
+  if (elapsedMs > LOGIN_ATTEMPT_WINDOW_MS) return { limited: false }
+  if (row.count < LOGIN_ATTEMPT_MAX) return { limited: false }
+
+  const retryAfterSeconds = Math.max(0, Math.ceil((LOGIN_ATTEMPT_WINDOW_MS - elapsedMs) / 1000))
+  return { limited: true, retryAfterSeconds }
 }
 
 export async function recordFailedLoginAttempt(db: DB, ip: string): Promise<void> {

@@ -15,6 +15,7 @@ import {
   addCustomCategory,
   ensureCustomCategory,
   getCustomCategories,
+  isLoginRateLimited,
 } from '@/lib/db/queries'
 
 // better-sqlite3 (sync) and the production libsql driver (async) expose the
@@ -225,6 +226,39 @@ describe('query functions', () => {
       await ensureCustomCategory(db, 'FOOD_AND_DRINK')
       const cats = await getCustomCategories(db)
       expect(cats).toHaveLength(0)
+    })
+  })
+
+  describe('isLoginRateLimited', () => {
+    const IP = '1.2.3.4'
+
+    it('returns limited:false when no attempts have been recorded', async () => {
+      const status = await isLoginRateLimited(db, IP)
+      expect(status).toEqual({ limited: false })
+    })
+
+    it('returns limited:false when under the attempt threshold within the window', async () => {
+      db.insert(schema.loginAttempts).values({ ip: IP, count: 3, windowStart: Date.now() }).run()
+      const status = await isLoginRateLimited(db, IP)
+      expect(status).toEqual({ limited: false })
+    })
+
+    it('returns limited:true with a retryAfterSeconds close to the full window when freshly limited', async () => {
+      db.insert(schema.loginAttempts).values({ ip: IP, count: 8, windowStart: Date.now() }).run()
+      const status = await isLoginRateLimited(db, IP)
+      expect(status.limited).toBe(true)
+      if (status.limited) {
+        // Window is 10 minutes (600s) — freshly limited should be very close to that, allowing for test execution time.
+        expect(status.retryAfterSeconds).toBeGreaterThan(595)
+        expect(status.retryAfterSeconds).toBeLessThanOrEqual(600)
+      }
+    })
+
+    it('returns limited:false once the window has fully elapsed', async () => {
+      const elevenMinutesAgo = Date.now() - 11 * 60 * 1000
+      db.insert(schema.loginAttempts).values({ ip: IP, count: 8, windowStart: elevenMinutesAgo }).run()
+      const status = await isLoginRateLimited(db, IP)
+      expect(status).toEqual({ limited: false })
     })
   })
 })
