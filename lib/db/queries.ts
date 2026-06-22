@@ -1,7 +1,7 @@
-import { desc, eq, and, gte, sql, asc, lt, ne } from 'drizzle-orm'
+import { desc, eq, and, gte, sql, asc, inArray, ne } from 'drizzle-orm'
 import * as schema from './schema'
 import type { DB } from './index'
-import { applyCategoryRules, type CategoryRule } from '@/lib/categories'
+import { applyCategoryRules, slugifyCategory, CATEGORY_LABELS, type CategoryRule } from '@/lib/categories'
 import { MANUAL_IMPORT_ITEM_ID } from '@/lib/constants'
 
 function shortAccountLabel(accountName: string, institutionName: string): string {
@@ -45,17 +45,6 @@ export async function getLatestSnapshot(db: DB) {
     .limit(1)
     .get()
   return row ?? null
-}
-
-export async function getSnapshotHistory(db: DB, days: number) {
-  const since = new Date()
-  since.setDate(since.getDate() - days)
-  return db
-    .select()
-    .from(schema.snapshots)
-    .where(gte(schema.snapshots.date, localDateString(since)))
-    .orderBy(asc(schema.snapshots.date))
-    .all()
 }
 
 export async function getAllSnapshotHistory(db: DB) {
@@ -439,18 +428,24 @@ export async function deleteCategoryRule(db: DB, id: string): Promise<void> {
 
 export async function applyAllCategoryRules(db: DB): Promise<void> {
   const rules = await getMerchantRules(db)
-  for (const rule of rules) {
-    await db
-      .update(schema.transactions)
-      .set({ customCategory: rule.category })
-      .where(
-        and(
-          eq(schema.transactions.merchantName, rule.merchantName),
-          sql`${schema.transactions.customCategory} IS NULL`,
-        )
+  if (rules.length === 0) return
+
+  const merchantNames = rules.map((r) => r.merchantName)
+  const caseClauses = sql.join(
+    rules.map((r) => sql`WHEN ${schema.transactions.merchantName} = ${r.merchantName} THEN ${r.category}`),
+    sql` `,
+  )
+
+  await db
+    .update(schema.transactions)
+    .set({ customCategory: sql`CASE ${caseClauses} END` })
+    .where(
+      and(
+        inArray(schema.transactions.merchantName, merchantNames),
+        sql`${schema.transactions.customCategory} IS NULL`,
       )
-      .run()
-  }
+    )
+    .run()
 }
 
 export async function updateTransactionCategory(db: DB, txId: string, category: string): Promise<void> {
@@ -541,16 +536,34 @@ export async function getMostRecentBudgets(db: DB, beforeYear: number, beforeMon
 
 export async function seedBudgetFromPrevious(db: DB, year: number, month: number): Promise<void> {
   const previous = await getMostRecentBudgets(db, year, month)
-  for (const b of previous) {
-    await upsertCategoryBudget(db, b.category, year, month, b.planned)
-  }
+  if (previous.length === 0) return
+
+  await db
+    .insert(schema.categoryBudgets)
+    .values(previous.map((b) => ({
+      id: `${b.category}_${year}_${month}`,
+      category: b.category,
+      year,
+      month,
+      planned: b.planned,
+    })))
+    .onConflictDoUpdate({
+      target: schema.categoryBudgets.id,
+      set: { planned: sql`excluded.planned` },
+    })
+    .run()
 }
 
 // ─── Custom categories ────────────────────────────────────────────────────────
 
 export async function getRecurringMerchants(db: DB) {
   const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+  // A 5-month window (instead of 3) so a merchant that's gone 1-2 months
+  // without charging still has enough history to be recognized as
+  // "established, but currently missing" (see likelyCancelled below) rather
+  // than rolling out of view the moment its most recent matching months age
+  // out of a too-tight lookback.
+  const start = new Date(now.getFullYear(), now.getMonth() - 4, 1)
   const rangeStart = localDateString(start)
 
   const rules = await getMerchantRules(db)
@@ -640,6 +653,15 @@ export async function getRecurringMerchants(db: DB) {
     const matchingAmounts = monthEntries
       .filter(m => m.days.some(d => Math.abs(d - bestDay) <= 2))
       .flatMap(m => m.amounts.filter((_, i) => Math.abs(m.days[i] - bestDay) <= 2))
+
+    // Same day-of-month alone is a weak signal — two unrelated charges can
+    // coincidentally land within 2 days of each other. Require the matching
+    // amounts to also be reasonably consistent (within 3x of each other),
+    // otherwise this is very unlikely to be a real recurring charge.
+    const minAmount = Math.min(...matchingAmounts)
+    const maxAmount = Math.max(...matchingAmounts)
+    if (minAmount > 0 && maxAmount / minAmount > 3) continue
+
     const avgAmount = matchingAmounts.reduce((s, a) => s + a, 0) / matchingAmounts.length
 
     result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false, groupName: null })
@@ -759,16 +781,38 @@ export async function getCustomCategories(db: DB) {
 }
 
 export async function addCustomCategory(db: DB, name: string, color?: string): Promise<void> {
+  const slug = slugifyCategory(name)
+  if (!slug) return
   const id = `custom_${Date.now()}`
   await db
     .insert(schema.customCategories)
-    .values({ id, name, color: color ?? null, createdAt: Math.floor(Date.now() / 1000) })
+    .values({ id, name: slug, color: color ?? null, createdAt: Math.floor(Date.now() / 1000) })
     .onConflictDoNothing()
     .run()
 }
 
 export async function deleteCustomCategory(db: DB, id: string): Promise<void> {
   await db.delete(schema.customCategories).where(eq(schema.customCategories.id, id)).run()
+}
+
+// Registers `category` as a known custom category (so it shows up wherever
+// the budget planner / pickers list "known" categories) if it isn't already
+// one of the built-ins or already tracked. Called whenever a transaction's
+// category is set to something new, regardless of which UI path did it —
+// otherwise a category created inline (e.g. via "Create new" on a
+// transaction without "apply to all" checked) tracks spend but can never be
+// budgeted because it never reaches the custom_categories table.
+export async function ensureCustomCategory(db: DB, category: string): Promise<void> {
+  const slug = slugifyCategory(category)
+  if (!slug || CATEGORY_LABELS[slug]) return
+  const existing = await db
+    .select({ id: schema.customCategories.id })
+    .from(schema.customCategories)
+    .where(eq(schema.customCategories.name, slug))
+    .get()
+  if (!existing) {
+    await addCustomCategory(db, slug)
+  }
 }
 
 // ─── Committed Items ──────────────────────────────────────────────────────────
@@ -921,17 +965,16 @@ export type RecurringMerchantWithStatus = {
   confirmedAmount: number | null
   confirmedDate: string | null
   confirmedAccountLabel: string | null
+  // True when this charge missed its expected day (plus a grace window) in
+  // both the current and previous month — a strong signal the subscription
+  // was cancelled. Surfaced so the user notices instead of it sitting as a
+  // permanent false "Pending" indefinitely.
+  likelyCancelled: boolean
 }
 
-export async function getRecurringMerchantsWithStatus(db: DB, year: number, month: number): Promise<RecurringMerchantWithStatus[]> {
-  const merchants = await getRecurringMerchants(db)
+async function getRecurringCandidateTxs(db: DB, year: number, month: number) {
   const { start, end } = monthBounds(year, month)
-
-  // Load group assignments for auto-detected merchants
-  const groupRows = await db.select().from(schema.recurringMerchantGroups).all()
-  const groupMap = new Map(groupRows.map((r) => [r.merchantName, r.groupName]))
-
-  const txs = await db
+  return db
     .select({
       merchantName: schema.transactions.merchantName,
       amount: schema.transactions.amount,
@@ -954,31 +997,70 @@ export async function getRecurringMerchantsWithStatus(db: DB, year: number, mont
       )
     )
     .all()
+}
 
-  return merchants.map((m) => {
-    const txEffectiveCategory = (tx: { category: string; customCategory: string | null }) =>
-      tx.customCategory ?? tx.category
+function findBestRecurringMatch<T extends { merchantName: string | null; amount: number; category: string; customCategory: string | null }>(
+  txs: T[],
+  m: { category: string; merchantName: string; avgAmount: number },
+): T | null {
+  const txEffectiveCategory = (tx: { category: string; customCategory: string | null }) =>
+    tx.customCategory ?? tx.category
 
-    // Primary: match by category label.
-    const categoryMatched = txs.filter((tx) => txEffectiveCategory(tx) === m.category)
+  // Primary: match by category label.
+  const categoryMatched = txs.filter((tx) => txEffectiveCategory(tx) === m.category)
 
-    // Tiebreaker: if keyword is set and multiple category matches exist, narrow by name.
-    let pool = categoryMatched
-    if (categoryMatched.length > 0 && m.merchantName) {
-      const kw = m.merchantName.toLowerCase()
-      const nameFiltered = categoryMatched.filter(
-        (tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false
-      )
-      if (nameFiltered.length > 0) pool = nameFiltered
-    }
+  // Tiebreaker: if keyword is set and multiple category matches exist, narrow by name.
+  let pool = categoryMatched
+  if (categoryMatched.length > 0 && m.merchantName) {
+    const kw = m.merchantName.toLowerCase()
+    const nameFiltered = categoryMatched.filter(
+      (tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false
+    )
+    if (nameFiltered.length > 0) pool = nameFiltered
+  }
 
-    const best = pool.sort((a, b) =>
-      Math.abs(a.amount - m.avgAmount) - Math.abs(b.amount - m.avgAmount)
-    )[0] ?? null
+  return pool.sort((a, b) =>
+    Math.abs(a.amount - m.avgAmount) - Math.abs(b.amount - m.avgAmount)
+  )[0] ?? null
+}
+
+export async function getRecurringMerchantsWithStatus(db: DB, year: number, month: number): Promise<RecurringMerchantWithStatus[]> {
+  const merchants = await getRecurringMerchants(db)
+
+  // Load group assignments for auto-detected merchants
+  const groupRows = await db.select().from(schema.recurringMerchantGroups).all()
+  const groupMap = new Map(groupRows.map((r) => [r.merchantName, r.groupName]))
+
+  const txs = await getRecurringCandidateTxs(db, year, month)
+
+  const now = new Date()
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
+  const today = now.getDate()
+
+  // Only fetched lazily, and only for non-manual merchants, since this is
+  // purely to detect "missed two months in a row" — manual entries are
+  // user-asserted and shouldn't be second-guessed.
+  let prevMonthTxs: Awaited<ReturnType<typeof getRecurringCandidateTxs>> | null = null
+
+  return await Promise.all(merchants.map(async (m) => {
+    const best = findBestRecurringMatch(txs, m)
 
     const groupName = m.isManual
       ? (m.groupName ?? null)
       : (groupMap.get(m.merchantName) ?? null)
+
+    // A charge is "likely cancelled" once it's missed its expected day (plus
+    // a week's grace for date drift) in the current month AND the previous
+    // month also has no match — a single missed month is too common (timing,
+    // a pending charge not yet posted) to flag.
+    let likelyCancelled = false
+    if (!m.isManual && best === null && isCurrentMonth && today > m.dayOfMonth + 7) {
+      if (prevMonthTxs === null) {
+        const prevDate = new Date(year, month - 2, 1)
+        prevMonthTxs = await getRecurringCandidateTxs(db, prevDate.getFullYear(), prevDate.getMonth() + 1)
+      }
+      likelyCancelled = findBestRecurringMatch(prevMonthTxs, m) === null
+    }
 
     return {
       merchantName: m.merchantName,
@@ -992,8 +1074,9 @@ export async function getRecurringMerchantsWithStatus(db: DB, year: number, mont
       confirmedAccountLabel: best
         ? shortAccountLabel(best.accountName ?? '', best.institutionName ?? '')
         : null,
+      likelyCancelled,
     }
-  })
+  }))
 }
 
 export async function setCommittedItemGroup(db: DB, id: string, groupName: string | null): Promise<void> {

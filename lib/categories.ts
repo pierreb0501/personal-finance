@@ -85,8 +85,11 @@ export function applyCategoryRules<
   })
 }
 
-export const ALL_KNOWN_CATEGORIES = Object.keys(CATEGORY_LABELS)
-
-export function getAllKnownCategories(customCategories: string[] = []): string[] {
-  return [...new Set([...ALL_KNOWN_CATEGORIES, ...customCategories])]
+// Canonical identifier form for a user-typed category name, matching the
+// BUILT_IN_STYLE used by Plaid's own categories (e.g. FOOD_AND_DRINK) so
+// custom categories created through different UI entry points (the category
+// manager, or "Create new" inline on a transaction) always collide into the
+// same identifier instead of silently forking into two categories.
+export function slugifyCategory(name: string): string {
+  return name.trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '')
 }

@@ -81,6 +81,12 @@ export function AccountManager({ items: initialItems }: { items: Item[] }) {
                   Needs reconnect
                 </span>
               )}
+              {item.status === 'error' && (
+                <span className="flex items-center gap-1 text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                  <AlertTriangle size={10} />
+                  Sync failing — check back later
+                </span>
+              )}
             </div>
 
             {item.accounts.map((account) => (

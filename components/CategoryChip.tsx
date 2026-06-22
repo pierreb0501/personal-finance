@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS, hashCategoryColor, type CategoryRule } from '@/lib/categories'
+import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS, hashCategoryColor, slugifyCategory, type CategoryRule } from '@/lib/categories'
 import { saveCategoryRule, saveTransactionCategory } from '@/app/actions'
 
 type Props = {
@@ -109,7 +109,7 @@ export function CategoryChip({ txId, merchantName, category: initialCategory, is
             })}
             {showCreate && (
               <button
-                onClick={() => handleSelect(search.toUpperCase().replace(/\s+/g, '_'))}
+                onClick={() => handleSelect(slugifyCategory(search))}
                 className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-[8px] text-[13px] text-left hover:bg-[#f5f2ec] text-[var(--accent-dark)] font-medium"
               >
                 <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ backgroundColor: hashCategoryColor(search) }} />

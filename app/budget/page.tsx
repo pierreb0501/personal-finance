@@ -1,5 +1,7 @@
+import Link from 'next/link'
+import { TriangleAlert, ArrowRight } from 'lucide-react'
 import { db } from '@/lib/db'
-import { getCategoryBreakdown, getCategoryBudgets, getMerchantRules, getCustomCategories, seedBudgetFromPrevious } from '@/lib/db/queries'
+import { getCategoryBreakdown, getCategoryBudgets, getMerchantRules, getCustomCategories, getUnlabeledTransfers, seedBudgetFromPrevious } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { BudgetRow } from '@/components/BudgetRow'
@@ -31,6 +33,7 @@ export default async function BudgetPage({
   const breakdown = await getCategoryBreakdown(db, year, month)
   const rules = await getMerchantRules(db)
   const customCats = await getCustomCategories(db)
+  const unlabeledTransfers = await getUnlabeledTransfers(db, year, month)
 
   const plannedMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const spendMap = new Map(breakdown.map((c) => [c.category, c.total]))
@@ -79,6 +82,22 @@ export default async function BudgetPage({
         </div>
         <MonthSelector year={year} month={month} basePath="/budget" />
       </div>
+
+      {/* Unlabeled transfers alert — these can skew the spend totals below */}
+      {unlabeledTransfers.length > 0 && (
+        <Link
+          href="/spending"
+          className="flex items-center gap-2.5 px-4 py-3 mb-[18px] bg-[#fdf6e3] border border-[#e8d89a] rounded-[14px] hover:bg-[#faf0cc] transition-colors"
+        >
+          <TriangleAlert size={14} className="text-[#b08a00] shrink-0" />
+          <p className="text-[13px] font-semibold text-[#7a5f00]">
+            {unlabeledTransfers.length === 1
+              ? '1 unlabeled transfer this month may be skewing these totals'
+              : `${unlabeledTransfers.length} unlabeled transfers this month may be skewing these totals`}
+          </p>
+          <ArrowRight size={13} className="text-[#b08a00] ml-auto shrink-0" />
+        </Link>
+      )}
 
       {/* Summary cards */}
       {totalPlanned > 0 && (

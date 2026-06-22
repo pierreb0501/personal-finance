@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { db } from '@/lib/db'
 import { plaidClient } from '@/lib/plaid'
+import { CATEGORY_LABELS, slugifyCategory } from '@/lib/categories'
 import {
   deleteAccount as dbDeleteAccount,
   upsertCategoryRule,
@@ -14,6 +15,7 @@ import {
   deleteCategoryBudget as dbDeleteCategoryBudget,
   addCustomCategory as dbAddCustomCategory,
   deleteCustomCategory as dbDeleteCustomCategory,
+  ensureCustomCategory,
   dismissRecurringMerchant,
   addManualRecurring,
   deleteManualRecurring,
@@ -25,15 +27,27 @@ import {
   setAutoRecurringGroup as dbSetAutoRecurringGroup,
 } from '@/lib/db/queries'
 
+// Built-in categories pass through unchanged; anything else is normalized to
+// the same canonical slug form used by custom_categories, so a category
+// created inline always lands in the same identifier space as one created
+// from the category manager (see lib/categories.ts: slugifyCategory).
+function normalizeCategory(category: string): string {
+  return CATEGORY_LABELS[category] ? category : slugifyCategory(category)
+}
+
 export async function saveCategoryRule(merchantName: string, category: string): Promise<void> {
-  upsertCategoryRule(db, merchantName, category)
+  const normalized = normalizeCategory(category)
+  upsertCategoryRule(db, merchantName, normalized)
+  ensureCustomCategory(db, normalized)
   revalidatePath('/')
   revalidatePath('/spending')
   revalidatePath('/budget')
 }
 
 export async function saveTransactionCategory(txId: string, category: string): Promise<void> {
-  updateTransactionCategory(db, txId, category)
+  const normalized = normalizeCategory(category)
+  updateTransactionCategory(db, txId, normalized)
+  ensureCustomCategory(db, normalized)
   revalidatePath('/')
   revalidatePath('/spending')
   revalidatePath('/budget')

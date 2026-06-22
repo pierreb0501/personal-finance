@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const items = sqliteTable('items', {
   id: text('id').primaryKey(),
@@ -7,7 +7,7 @@ export const items = sqliteTable('items', {
   cursor: text('cursor'),
   institutionName: text('institution_name').notNull(),
   createdAt: integer('created_at').notNull(),
-  status: text('status').notNull().default('ok'), // 'ok' | 'login_required'
+  status: text('status').notNull().default('ok'), // 'ok' | 'login_required' | 'error'
 })
 
 export const accounts = sqliteTable('accounts', {
@@ -23,7 +23,9 @@ export const accounts = sqliteTable('accounts', {
   balanceAvailable: real('balance_available'),
   isoCurrencyCode: text('iso_currency_code').notNull(),
   updatedAt: integer('updated_at').notNull(),
-})
+}, (table) => [
+  index('accounts_item_id_idx').on(table.itemId),
+])
 
 export const transactions = sqliteTable('transactions', {
   id: text('id').primaryKey(),
@@ -39,7 +41,11 @@ export const transactions = sqliteTable('transactions', {
   pending: integer('pending').notNull(),
   customCategory: text('custom_category'),
   ignored: integer('ignored').notNull().default(0),
-})
+}, (table) => [
+  index('transactions_date_idx').on(table.date),
+  index('transactions_account_id_idx').on(table.accountId),
+  index('transactions_merchant_name_idx').on(table.merchantName),
+])
 
 export const holdings = sqliteTable('holdings', {
   id: text('id').primaryKey(),

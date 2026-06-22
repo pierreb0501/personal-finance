@@ -12,6 +12,7 @@ import {
   getAllAccounts,
   getUnlabeledTransfers,
   getCreditCardBalances,
+  getCustomCategories,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -81,8 +82,12 @@ export default async function OverviewPage() {
   const prevSnapshot = history.length >= 2 ? history[history.length - 2] : null
   const investDelta = prevSnapshot ? investmentsVal - prevSnapshot.investmentsValue : null
 
-  // Known custom categories from rules
-  const knownCustomCategories = [...new Set(rules.map((r) => r.category))]
+  // Known custom categories from rules and the custom categories table
+  const customCats = await getCustomCategories(db)
+  const knownCustomCategories = [...new Set([
+    ...rules.map((r) => r.category),
+    ...customCats.map((c) => c.name),
+  ])]
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">

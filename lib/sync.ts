@@ -22,8 +22,16 @@ export async function syncAll(db: DB = defaultDb) {
     } catch (err) {
       console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
       const plaidErrorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
-      if (plaidErrorCode === 'ITEM_LOGIN_REQUIRED') {
-        await db.update(schema.items).set({ status: 'login_required' }).where(eq(schema.items.id, item.id)).run()
+      // ITEM_LOGIN_REQUIRED needs the user to reconnect; the rest are transient
+      // (rate limits, Plaid still preparing data, etc.) so we just mark the item
+      // broken without claiming it needs a fresh login — the next sync retries it.
+      const status = plaidErrorCode === 'ITEM_LOGIN_REQUIRED'
+        ? 'login_required'
+        : plaidErrorCode
+          ? 'error'
+          : null
+      if (status) {
+        await db.update(schema.items).set({ status }).where(eq(schema.items.id, item.id)).run()
       }
     }
   }
@@ -49,13 +57,29 @@ export async function syncItem(db: DB, item: Item) {
 async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
   const response = await plaidClient.accountsGet({ access_token: item.accessToken })
   const plaidAccounts = response.data.accounts
-  const map = new Map<string, string>()
   const ts = Math.floor(Date.now() / 1000)
 
+  // Fetch any already-known ids up front so new rows can be inserted with a
+  // pre-assigned id instead of re-selecting after each insert.
+  const accountIds = plaidAccounts.map((a) => a.account_id)
+  const existing = accountIds.length > 0
+    ? await db
+      .select({ id: schema.accounts.id, plaidAccountId: schema.accounts.plaidAccountId })
+      .from(schema.accounts)
+      .where(inArray(schema.accounts.plaidAccountId, accountIds))
+      .all()
+    : []
+  const existingIds = new Map(existing.map((e) => [e.plaidAccountId, e.id]))
+
+  const map = new Map<string, string>()
+
   for (const acc of plaidAccounts) {
+    const id = existingIds.get(acc.account_id) ?? crypto.randomUUID()
+    map.set(acc.account_id, id)
+
     await db.insert(schema.accounts)
       .values({
-        id: crypto.randomUUID(),
+        id,
         itemId: item.id,
         plaidAccountId: acc.account_id,
         name: acc.name,
@@ -75,13 +99,6 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
         },
       })
       .run()
-
-    const row = (await db
-      .select({ id: schema.accounts.id })
-      .from(schema.accounts)
-      .where(eq(schema.accounts.plaidAccountId, acc.account_id))
-      .get())!
-    map.set(acc.account_id, row.id)
   }
 
   return map
@@ -98,54 +115,70 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
     })
     const { added, modified, removed, next_cursor, has_more } = response.data
 
-    for (const tx of [...added, ...modified]) {
-      const accountId = accountMap.get(tx.account_id)
-      if (!accountId) continue
+    let unmappedCount = 0
 
-      await db.insert(schema.transactions)
-        .values({
-          id: tx.transaction_id,
-          accountId,
-          amount: tx.amount,
-          date: tx.date,
-          merchantName: tx.merchant_name ?? null,
-          rawName: tx.name ?? null,
-          category: tx.personal_finance_category?.primary ?? 'OTHER',
-          categoryDetailed: tx.personal_finance_category?.detailed ?? 'OTHER_OTHER',
-          pending: tx.pending ? 1 : 0,
-        })
-        .onConflictDoUpdate({
-          target: schema.transactions.id,
-          set: {
-            amount: tx.amount,
-            date: tx.date,
-            merchantName: tx.merchant_name ?? null,
-            rawName: tx.name ?? null,
-            category: tx.personal_finance_category?.primary ?? 'OTHER',
-            categoryDetailed: tx.personal_finance_category?.detailed ?? 'OTHER_OTHER',
-            pending: tx.pending ? 1 : 0,
-          },
-        })
-        .run()
-    }
+    // Each page is applied atomically together with its cursor advance, so a
+    // crash mid-page can't leave partial writes paired with an already-advanced
+    // cursor (which would make those rows unrecoverable on the next sync).
+    await db.transaction(async (tx) => {
+      for (const t of [...added, ...modified]) {
+        const accountId = accountMap.get(t.account_id)
+        if (!accountId) {
+          unmappedCount++
+          continue
+        }
 
-    if (removed.length > 0) {
-      const ids = removed.map((r) => r.transaction_id).filter((id): id is string => typeof id === 'string')
-      if (ids.length > 0) {
-        await db.delete(schema.transactions)
-          .where(inArray(schema.transactions.id, ids))
+        await tx.insert(schema.transactions)
+          .values({
+            id: t.transaction_id,
+            accountId,
+            amount: t.amount,
+            date: t.date,
+            merchantName: t.merchant_name ?? null,
+            rawName: t.name ?? null,
+            category: t.personal_finance_category?.primary ?? 'OTHER',
+            categoryDetailed: t.personal_finance_category?.detailed ?? 'OTHER_OTHER',
+            pending: t.pending ? 1 : 0,
+          })
+          .onConflictDoUpdate({
+            target: schema.transactions.id,
+            set: {
+              amount: t.amount,
+              date: t.date,
+              merchantName: t.merchant_name ?? null,
+              rawName: t.name ?? null,
+              category: t.personal_finance_category?.primary ?? 'OTHER',
+              categoryDetailed: t.personal_finance_category?.detailed ?? 'OTHER_OTHER',
+              pending: t.pending ? 1 : 0,
+            },
+          })
           .run()
       }
+
+      if (removed.length > 0) {
+        const ids = removed.map((r) => r.transaction_id).filter((id): id is string => typeof id === 'string')
+        if (ids.length > 0) {
+          await tx.delete(schema.transactions)
+            .where(inArray(schema.transactions.id, ids))
+            .run()
+        }
+      }
+
+      // Save cursor in the same transaction as the page's writes
+      await tx.update(schema.items)
+        .set({ cursor: next_cursor })
+        .where(eq(schema.items.id, item.id))
+        .run()
+    })
+
+    if (unmappedCount > 0) {
+      console.error(
+        `Sync for item ${item.institutionName}: dropped ${unmappedCount} transaction(s) referencing an unmapped Plaid account_id`,
+      )
     }
 
     cursor = next_cursor
     hasMore = has_more
-
-    // Save cursor after each page to ensure progress is not lost
-    await db.update(schema.items)
-      .set({ cursor })
-      .where(eq(schema.items.id, item.id))
-      .run()
   }
 }
 
@@ -155,7 +188,8 @@ async function fetchUsdCadRate(): Promise<number> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json() as { rates: { CAD: number } }
     return data.rates.CAD
-  } catch {
+  } catch (err) {
+    console.error('USD/CAD rate fetch failed, falling back to stale hardcoded rate (1.38):', (err as Error).message)
     return 1.38 // reasonable fallback if the API is unavailable
   }
 }
@@ -199,13 +233,17 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
   // These are the exact values shown in Wealthsimple (or whichever institution).
   // We will scale individual holding values so they sum exactly to this balance.
   const accountBalances = new Map<string, number>()
-  for (const [plaidAccountId, internalId] of accountMap.entries()) {
-    const row = await db
-      .select({ balanceCurrent: schema.accounts.balanceCurrent })
+  if (internalAccountIds.length > 0) {
+    const balanceRows = await db
+      .select({ id: schema.accounts.id, balanceCurrent: schema.accounts.balanceCurrent })
       .from(schema.accounts)
-      .where(eq(schema.accounts.id, internalId))
-      .get()
-    if (row) accountBalances.set(plaidAccountId, row.balanceCurrent)
+      .where(inArray(schema.accounts.id, internalAccountIds))
+      .all()
+    const balanceById = new Map(balanceRows.map((r) => [r.id, r.balanceCurrent]))
+    for (const [plaidAccountId, internalId] of accountMap.entries()) {
+      const balance = balanceById.get(internalId)
+      if (balance !== undefined) accountBalances.set(plaidAccountId, balance)
+    }
   }
 
   // Group holdings by Plaid account_id so we can scale per account

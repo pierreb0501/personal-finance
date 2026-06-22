@@ -5,6 +5,11 @@ import { applyAllCategoryRules } from '@/lib/db/queries'
 import { revalidatePath } from 'next/cache'
 import { MANUAL_IMPORT_ITEM_ID as MANUAL_ITEM_ID, AMEX_CSV_ACCOUNT_ID as AMEX_ACCOUNT_ID } from '@/lib/constants'
 
+// Thrown for problems with the uploaded file itself — safe to show to the user.
+// Anything else (DB errors, etc.) is logged server-side and replaced with a
+// generic message before it reaches the client.
+class AmexImportError extends Error {}
+
 const MONTH_MAP: Record<string, string> = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
@@ -34,7 +39,7 @@ async function ensureAmexAccount() {
 }
 
 // RFC 4180 compliant — handles quoted fields with embedded newlines and commas
-function parseRfc4180(text: string): string[][] {
+export function parseRfc4180(text: string): string[][] {
   const rows: string[][] = []
   let row: string[] = []
   let field = ''
@@ -88,7 +93,7 @@ function parseRfc4180(text: string): string[][] {
   return rows.filter(r => r.some(f => f))
 }
 
-function parseDate(raw: string): string | null {
+export function parseDate(raw: string): string | null {
   // "10 Jun 2026" — Amex Canada format
   const monthName = raw.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/)
   if (monthName) {
@@ -110,9 +115,9 @@ function parseDate(raw: string): string | null {
 
 type AmexRow = { date: string; description: string; amount: number; id: string }
 
-function parseAmexCsv(text: string): AmexRow[] {
+export function parseAmexCsv(text: string): AmexRow[] {
   const rows = parseRfc4180(text)
-  if (rows.length < 2) throw new Error('CSV appears empty')
+  if (rows.length < 2) throw new AmexImportError('CSV appears empty')
 
   const header = rows[0].map(h => h.toLowerCase())
   const dateIdx = header.findIndex(h => h === 'date')
@@ -121,7 +126,7 @@ function parseAmexCsv(text: string): AmexRow[] {
   const refIdx = header.findIndex(h => h === 'reference')
 
   if (dateIdx === -1 || amountIdx === -1) {
-    throw new Error(`Could not find required columns. Got: ${header.join(', ')}`)
+    throw new AmexImportError(`Could not find required columns. Got: ${header.join(', ')}`)
   }
 
   const results: AmexRow[] = []
@@ -161,7 +166,7 @@ export async function POST(req: NextRequest) {
 
     const text = await file.text()
     const rows = parseAmexCsv(text)
-    if (rows.length === 0) return NextResponse.json({ error: 'No transactions found in CSV' }, { status: 400 })
+    if (rows.length === 0) throw new AmexImportError('No transactions found in CSV')
 
     await ensureAmexAccount()
 
@@ -192,6 +197,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ imported, skipped, total: rows.length })
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+    if (err instanceof AmexImportError) {
+      return NextResponse.json({ error: err.message }, { status: 400 })
+    }
+    console.error('Amex import failed:', err)
+    return NextResponse.json({ error: 'Import failed — please try again' }, { status: 500 })
   }
 }

@@ -632,6 +632,13 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
               <Repeat2 size={9} />{formatCAD(m.confirmedAmount)}
               {m.confirmedDate && <span className="opacity-70">· {formatDate(m.confirmedDate)}</span>}
             </span>
+          ) : m.likelyCancelled ? (
+            <span
+              title="Missed its expected day two months in a row — may have been cancelled. Remove it with the X if so."
+              className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-[#fdf3e3] px-1.5 py-0.5 rounded-full"
+            >
+              Possibly cancelled
+            </span>
           ) : (
             <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full">Pending</span>
           )}

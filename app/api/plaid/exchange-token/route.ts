@@ -11,6 +11,9 @@ export async function POST(req: NextRequest) {
     if (!public_token || typeof public_token !== 'string') {
       return NextResponse.json({ error: 'public_token is required' }, { status: 400 })
     }
+    if (institution_name !== undefined && typeof institution_name !== 'string') {
+      return NextResponse.json({ error: 'institution_name must be a string' }, { status: 400 })
+    }
 
     const exchangeRes = await plaidClient.itemPublicTokenExchange({
       public_token: public_token,
@@ -22,7 +25,7 @@ export async function POST(req: NextRequest) {
       plaidItemId: item_id,
       accessToken: access_token,
       cursor: null,
-      institutionName: institution_name ?? 'Unknown',
+      institutionName: institution_name?.trim() || 'Unknown',
       createdAt: Math.floor(Date.now() / 1000),
     }).run()
 

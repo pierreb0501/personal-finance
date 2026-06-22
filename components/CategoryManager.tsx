@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Trash2, Plus } from 'lucide-react'
-import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
+import { getCategoryColor, getCategoryLabel, slugifyCategory } from '@/lib/categories'
 import { addCustomCategory, deleteCustomCategory } from '@/app/actions'
 
 type CustomCategory = {
@@ -25,23 +25,24 @@ type Props = {
 export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
   const [customs, setCustoms] = useState(initialCustoms)
   const [newName, setNewName] = useState('')
-  const [newColor, setNewColor] = useState<string>(PALETTE[0])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   async function handleAdd() {
     const trimmed = newName.trim()
     if (!trimmed) return
-    if (customs.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+    const slug = slugifyCategory(trimmed)
+    if (!slug) return
+    if (customs.some((c) => c.name === slug)) {
       setError('A category with that name already exists.')
       return
     }
     setSaving(true)
     setError('')
-    await addCustomCategory(trimmed, newColor)
+    await addCustomCategory(trimmed)
     setCustoms((prev) => [
       ...prev,
-      { id: `custom_${Date.now()}`, name: trimmed, color: newColor, createdAt: Date.now() },
+      { id: `custom_${Date.now()}`, name: slug, color: null, createdAt: Date.now() },
     ].sort((a, b) => a.name.localeCompare(b.name)))
     setNewName('')
     setSaving(false)
@@ -74,26 +75,6 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
             />
           </div>
 
-          <div>
-            <label className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] block mb-1.5">
-              Color
-            </label>
-            <div className="flex gap-1.5 flex-wrap">
-              {PALETTE.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setNewColor(c)}
-                  className="w-6 h-6 rounded-[6px] transition-transform hover:scale-110 cursor-pointer"
-                  style={{
-                    backgroundColor: c,
-                    outline: newColor === c ? `2.5px solid ${c}` : 'none',
-                    outlineOffset: '2px',
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-
           <button
             onClick={handleAdd}
             disabled={!newName.trim() || saving}
@@ -116,12 +97,15 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
             <p className="text-[12px] text-[var(--faint)] mt-0.5">Created by you — can be deleted</p>
           </div>
           {customs.map((cat) => {
-            const color = cat.color ?? getCategoryColor(cat.name)
+            // Always derive from the name (same deterministic hash every other
+            // screen uses) rather than a stored color, so the swatch shown
+            // here always matches what's actually rendered elsewhere.
+            const color = getCategoryColor(cat.name)
             return (
               <div key={cat.id} className="flex items-center justify-between py-3.5 border-b border-[var(--hairline)] last:border-0">
                 <div className="flex items-center gap-2.5">
                   <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ backgroundColor: color }} />
-                  <span className="text-[14px] font-semibold text-[var(--ink)]">{cat.name}</span>
+                  <span className="text-[14px] font-semibold text-[var(--ink)]">{getCategoryLabel(cat.name)}</span>
                 </div>
                 <button
                   onClick={() => handleDelete(cat.id)}

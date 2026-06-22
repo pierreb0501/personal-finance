@@ -78,6 +78,13 @@
       "when": 1780500000006,
       "tag": "0010_raw_name",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1780500000007,
+      "tag": "0011_hot_path_indexes",
+      "breakpoints": true
     }
   ]
 }
