@@ -402,3 +402,9 @@ git commit -m "fix: restore LOGIN_ATTEMPT_MAX after manual testing"
 ```
 
 (Skip this commit if it's already `8` — nothing to do.)
+
+---
+
+### Addendum: unplanned CSP fix (commit `1d3d124`)
+
+While manually verifying Task 3 with a real browser, discovered that the CSP added during an earlier, separate security-hardening pass was blocking all client-side JS hydration site-wide (Next.js streams Server Component data via inline `<script>` tags that a strict `script-src` with no nonce/`unsafe-inline` blocks) — confirmed live-broken in production, not just locally. Out of this plan's original scope, but fixed immediately in its own commit (`proxy.ts` switched to Next's documented nonce-based CSP pattern) since it was a live, severe regression discovered as a direct result of this feature's testing. See commit message for full detail and verification steps.
