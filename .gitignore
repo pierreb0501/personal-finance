@@ -48,3 +48,4 @@ finance.db-wal
 
 # Environment
 .env.local
+.superpowers/
