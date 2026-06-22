@@ -9,7 +9,7 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-background flex items-center justify-center px-4">
+    <main className="min-h-dvh bg-[var(--canvas)] flex items-center justify-center px-4">
       <LoginForm />
     </main>
   )
