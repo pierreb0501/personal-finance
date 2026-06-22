@@ -1,28 +1,9 @@
 import type { NextConfig } from "next";
 
-// No nonces: this app mixes statically-optimized pages (e.g. /connect,
-// /oauth-callback) with dynamic ones, and nonce-based CSP requires every
-// page to render dynamically. A static policy set here covers all routes
-// without changing the existing rendering strategy.
-const isDev = process.env.NODE_ENV === "development";
-
-const cspHeader = `
-  default-src 'self';
-  script-src 'self' https://cdn.plaid.com${isDev ? " 'unsafe-eval'" : ""};
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' data: https://*.plaid.com;
-  font-src 'self';
-  connect-src 'self' https://*.plaid.com;
-  frame-src https://cdn.plaid.com https://*.plaid.com;
-  object-src 'none';
-  base-uri 'self';
-  form-action 'self';
-  frame-ancestors 'none';
-  upgrade-insecure-requests;
-`.replace(/\s{2,}/g, ' ').trim();
-
+// Content-Security-Policy is set per-request in proxy.ts instead of here —
+// it needs a fresh nonce on every request (see proxy.ts for why). Everything
+// else here is static and doesn't need a nonce.
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: cspHeader },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

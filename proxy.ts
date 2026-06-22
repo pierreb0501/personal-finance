@@ -7,24 +7,68 @@ import { readSessionFromCookieHeader } from '@/lib/session'
 // (lib/dal.ts) and per-route checks in API handlers still apply.
 const PUBLIC_PATHS = ['/login']
 
+const isDev = process.env.NODE_ENV === 'development'
+
+// Per-request nonce CSP. Next.js App Router streams Server Component data to
+// the client via inline <script>self.__next_f.push(...)</script> tags — this
+// is core to hydration, not optional — so a CSP without 'unsafe-inline' or a
+// nonce silently breaks all client-side interactivity site-wide (confirmed:
+// it did, in production, before this fix). Nonces let us keep script-src
+// strict without that tradeoff. This requires every page to render
+// dynamically, which the auth gate already forces (every page reads the
+// session cookie), so there's no rendering-strategy cost to switching to
+// nonces from the previous static policy.
+function buildCspHeader(nonce: string): string {
+  return `
+    default-src 'self';
+    script-src 'self' https://cdn.plaid.com 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''};
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: https://*.plaid.com;
+    font-src 'self';
+    connect-src 'self' https://*.plaid.com;
+    frame-src https://cdn.plaid.com https://*.plaid.com;
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    frame-ancestors 'none';
+    upgrade-insecure-requests;
+  `.replace(/\s{2,}/g, ' ').trim()
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const cspHeader = buildCspHeader(nonce)
+
+  // Forward the nonce to the page (via x-nonce) so Server Components can read
+  // it with headers() and pass it to any manual <Script> tags, and set it on
+  // the request headers so Next's own renderer applies it to its
+  // framework/page scripts — see content-security-policy guide.
+  const requestHeaders = new Headers(req.headers)
+  requestHeaders.set('x-nonce', nonce)
+  requestHeaders.set('Content-Security-Policy', cspHeader)
+
+  function withCsp(response: NextResponse): NextResponse {
+    response.headers.set('Content-Security-Policy', cspHeader)
+    return response
+  }
+
   if (PUBLIC_PATHS.includes(pathname)) {
-    return NextResponse.next()
+    return withCsp(NextResponse.next({ request: { headers: requestHeaders } }))
   }
 
   const session = await readSessionFromCookieHeader(req.headers.get('cookie'))
 
   if (!session) {
     if (pathname.startsWith('/api')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return withCsp(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
     }
     const loginUrl = new URL('/login', req.nextUrl)
-    return NextResponse.redirect(loginUrl)
+    return withCsp(NextResponse.redirect(loginUrl))
   }
 
-  return NextResponse.next()
+  return withCsp(NextResponse.next({ request: { headers: requestHeaders } }))
 }
 
 export const config = {
