@@ -109,7 +109,7 @@ Expected: PASS — 4 tests passing.
 - [ ] **Step 5: Run the full test suite and typecheck**
 
 Run: `npx jest && npx tsc --noEmit`
-Expected: All existing tests still pass (note: `app/login/actions.ts` still calls `isLoginRateLimited` expecting the old boolean shape at this point, so `tsc --noEmit` is **expected to fail** here — that's fine, Task 2 fixes the caller. Confirm the *only* new errors are in `app/login/actions.ts`, nothing else.)
+Expected: All existing tests still pass. `tsc --noEmit` will likely stay **clean** even though `app/login/actions.ts` still calls `isLoginRateLimited` expecting the old boolean shape — `if (someObject)` type-checks fine in TypeScript since any non-`void` object is truthy, so this is a silent *runtime* bug, not a compile error. **This means after this task alone, `app/login/actions.ts` will treat every login attempt as rate-limited (since `{ limited: false }` is itself truthy) — login is completely broken until Task 2 lands.** This is expected mid-plan, but it is a real deploy-order hazard: do not push this commit alone to a branch that auto-deploys (this repo deploys to Vercel on push to `main`). Proceed directly to Task 2 before pushing anything.
 
 - [ ] **Step 6: Commit**
 
