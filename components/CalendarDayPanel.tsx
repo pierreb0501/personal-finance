@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { X, CalendarClock } from 'lucide-react'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
@@ -28,6 +29,14 @@ export function CalendarDayPanel({ date, day, rules, knownCustomCategories, onCl
   const expected = day?.expected ?? []
   const netTotal = day?.netTotal ?? 0
   const hasContent = actual.length > 0 || expected.length > 0
+
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
 
   return (
     <>
