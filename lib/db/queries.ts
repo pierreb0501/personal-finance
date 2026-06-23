@@ -1079,6 +1079,96 @@ export async function getRecurringMerchantsWithStatus(db: DB, year: number, mont
   }))
 }
 
+// ─── Calendar ────────────────────────────────────────────────────────────────
+
+export type CalendarTxEntry = Awaited<ReturnType<typeof getTransactionsForMonth>>[number]
+
+export type CalendarExpectedEntry = {
+  id: string
+  name: string
+  amount: number
+  type: 'income' | 'expense'
+  category: string
+  source: 'committed' | 'recurring'
+}
+
+export type CalendarDay = {
+  date: string
+  netTotal: number
+  actual: CalendarTxEntry[]
+  expected: CalendarExpectedEntry[]
+}
+
+export type CalendarMonth = {
+  days: CalendarDay[]
+  maxAbsNetTotal: number
+}
+
+function dateForDay(year: number, month: number, day: number, daysInMonth: number): string {
+  const clamped = Math.min(day, daysInMonth)
+  return `${year}-${String(month).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`
+}
+
+export async function getCalendarMonth(db: DB, year: number, month: number): Promise<CalendarMonth> {
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const todayStr = localDateString(new Date())
+
+  const dayMap = new Map<string, CalendarDay>()
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = dateForDay(year, month, d, daysInMonth)
+    dayMap.set(date, { date, netTotal: 0, actual: [], expected: [] })
+  }
+
+  // Actual entries — getTransactionsForMonth excludes pending but not
+  // ignored transactions, so filter those out here too.
+  const txs = (await getTransactionsForMonth(db, year, month)).filter((tx) => !tx.ignored)
+  for (const tx of txs) {
+    const day = dayMap.get(tx.date)
+    if (!day) continue
+    day.actual.push(tx)
+    day.netTotal += -tx.amount
+  }
+
+  // Expected entries — only for days not already in the past, and only
+  // for items that haven't posted (confirmedAmount === null) this month.
+  const committedItems = await getCommittedItemsWithStatus(db, year, month)
+  for (const item of committedItems) {
+    if (item.confirmedAmount !== null) continue
+    if (item.expectedDay === null) continue
+    const date = dateForDay(year, month, item.expectedDay, daysInMonth)
+    if (date < todayStr) continue
+    dayMap.get(date)?.expected.push({
+      id: item.id,
+      name: item.name,
+      amount: item.expectedAmount,
+      type: item.type,
+      category: item.category,
+      source: 'committed',
+    })
+  }
+
+  const recurringMerchants = await getRecurringMerchantsWithStatus(db, year, month)
+  for (const m of recurringMerchants) {
+    if (m.confirmedAmount !== null) continue
+    if (m.likelyCancelled) continue
+    const date = dateForDay(year, month, m.dayOfMonth, daysInMonth)
+    if (date < todayStr) continue
+    dayMap.get(date)?.expected.push({
+      id: `recurring-${m.merchantName}`,
+      name: m.merchantName,
+      amount: m.avgAmount,
+      type: 'expense',
+      category: m.category,
+      source: 'recurring',
+    })
+  }
+
+  const days = Array.from(dayMap.values())
+  const maxAbsNetTotal = days.reduce((max, d) => Math.max(max, Math.abs(d.netTotal)), 0)
+
+  return { days, maxAbsNetTotal }
+}
+
 export async function setCommittedItemGroup(db: DB, id: string, groupName: string | null): Promise<void> {
   await db.update(schema.committedItems)
     .set({ groupName: groupName ?? null })

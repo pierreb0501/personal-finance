@@ -7,6 +7,7 @@ type Props = {
   year: number
   month: number
   basePath?: string
+  allowFuture?: boolean
 }
 
 const MONTH_NAMES = [
@@ -14,7 +15,7 @@ const MONTH_NAMES = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]
 
-export function MonthSelector({ year, month, basePath = '/spending' }: Props) {
+export function MonthSelector({ year, month, basePath = '/spending', allowFuture = false }: Props) {
   const router = useRouter()
   const now = new Date()
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
@@ -40,7 +41,7 @@ export function MonthSelector({ year, month, basePath = '/spending' }: Props) {
       </span>
       <button
         onClick={() => navigate(1)}
-        disabled={isCurrentMonth}
+        disabled={!allowFuture && isCurrentMonth}
         className="p-[5px] rounded-[7px] hover:bg-white transition-colors text-[var(--muted-text)] hover:text-[var(--ink)] disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
       >
         <ChevronRight size={15} />
