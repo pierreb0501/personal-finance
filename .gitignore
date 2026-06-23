@@ -49,3 +49,6 @@ finance.db-wal
 # Environment
 .env.local
 .superpowers/
+
+# Git worktrees
+.worktrees/
