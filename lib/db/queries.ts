@@ -780,6 +780,19 @@ export async function getCustomCategories(db: DB) {
     .all()
 }
 
+// Merchant rules + custom categories, plus the union of their category names —
+// almost every page needs both the raw rules (to pass to category pickers)
+// and the deduped name list (to know what's "known").
+export async function getKnownCategories(db: DB): Promise<{ rules: CategoryRule[]; knownCustomCategories: string[] }> {
+  const rules = await getMerchantRules(db)
+  const customCats = await getCustomCategories(db)
+  const knownCustomCategories = [...new Set([
+    ...rules.map((r) => r.category),
+    ...customCats.map((c) => c.name),
+  ])]
+  return { rules, knownCustomCategories }
+}
+
 export async function addCustomCategory(db: DB, name: string, color?: string): Promise<void> {
   const slug = slugifyCategory(name)
   if (!slug) return
@@ -833,6 +846,9 @@ export async function addCommittedItem(
   category: string,
   expectedDay?: number,
   merchantName?: string,
+  intervalMonths?: number,
+  anchorYear?: number,
+  anchorMonth?: number,
 ): Promise<void> {
   await db.insert(schema.committedItems)
     .values({
@@ -844,6 +860,9 @@ export async function addCommittedItem(
       expectedDay: expectedDay ?? null,
       merchantName: merchantName ?? null,
       createdAt: Math.floor(Date.now() / 1000),
+      intervalMonths: intervalMonths ?? 1,
+      anchorYear: anchorYear ?? null,
+      anchorMonth: anchorMonth ?? null,
     })
     .run()
 }
@@ -863,14 +882,29 @@ export type CommittedItemWithStatus = {
   merchantName: string | null
   category: string
   groupName: string | null
+  intervalMonths: number
+  anchorYear: number | null
+  anchorMonth: number | null
   confirmedAmount: number | null
   confirmedCount: number
   confirmedAccountLabel: string | null
 }
 
+function isItemDueInMonth(
+  item: { intervalMonths: number; anchorYear: number | null; anchorMonth: number | null },
+  year: number,
+  month: number,
+): boolean {
+  if (item.intervalMonths <= 1) return true
+  if (item.anchorYear === null || item.anchorMonth === null) return true
+  const diff = (year * 12 + month) - (item.anchorYear * 12 + item.anchorMonth)
+  return diff >= 0 && diff % item.intervalMonths === 0
+}
+
 export async function getCommittedItemsWithStatus(db: DB, year: number, month: number): Promise<CommittedItemWithStatus[]> {
   const { start, end } = monthBounds(year, month)
-  const items = await getCommittedItems(db)
+  const allItems = await getCommittedItems(db)
+  const items = allItems.filter((item) => isItemDueInMonth(item, year, month))
 
   const txs = await db
     .select({
@@ -932,6 +966,9 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
         merchantName: item.merchantName,
         category: item.category,
         groupName: item.groupName ?? null,
+        intervalMonths: item.intervalMonths,
+        anchorYear: item.anchorYear,
+        anchorMonth: item.anchorMonth,
         confirmedAmount: total,
         confirmedCount: matched.length,
         confirmedAccountLabel: label,
@@ -948,6 +985,9 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
       merchantName: item.merchantName,
       category: item.category,
       groupName: item.groupName ?? null,
+      intervalMonths: item.intervalMonths,
+      anchorYear: item.anchorYear,
+      anchorMonth: item.anchorMonth,
       confirmedAmount: null,
       confirmedCount: 0,
       confirmedAccountLabel: null,

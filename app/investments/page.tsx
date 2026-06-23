@@ -6,6 +6,7 @@ import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
 import { DonutChart } from '@/components/DonutChart'
 import { HoldingRow } from '@/components/HoldingRow'
 import { EmptyState } from '@/components/EmptyState'
+import { Card } from '@/components/Card'
 import { BarChart2 } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +65,7 @@ export default async function InvestmentsPage() {
           label="Portfolio value"
         />
 
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
             Allocation
           </h3>
@@ -73,11 +74,11 @@ export default async function InvestmentsPage() {
           ) : (
             <DonutChart segments={allocationSegments} />
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Holdings table */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+      <Card>
         <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
           Holdings
         </h3>
@@ -125,7 +126,7 @@ export default async function InvestmentsPage() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

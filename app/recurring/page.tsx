@@ -2,11 +2,11 @@ import { db } from '@/lib/db'
 import {
   getCommittedItemsWithStatus,
   getRecurringMerchantsWithStatus,
-  getMerchantRules,
-  getCustomCategories,
+  getKnownCategories,
 } from '@/lib/db/queries'
 import { MonthSelector } from '@/components/MonthSelector'
 import { RecurringChecklist } from '@/components/RecurringChecklist'
+import { parseMonthParams } from '@/lib/month'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -18,19 +18,11 @@ export default async function RecurringPage({
 }: {
   searchParams: Promise<{ year?: string; month?: string }>
 }) {
-  const { year: yearStr, month: monthStr } = await searchParams
-  const now = new Date()
-  const year = yearStr ? Number(yearStr) : now.getFullYear()
-  const month = monthStr ? Number(monthStr) : now.getMonth() + 1
+  const { year, month } = parseMonthParams(await searchParams)
 
   const committedItems = await getCommittedItemsWithStatus(db, year, month)
   const recurringMerchants = await getRecurringMerchantsWithStatus(db, year, month)
-  const rules = await getMerchantRules(db)
-  const customCats = await getCustomCategories(db)
-  const knownCustomCategories = [...new Set([
-    ...rules.map((r) => r.category),
-    ...customCats.map((c) => c.name),
-  ])]
+  const { knownCustomCategories } = await getKnownCategories(db)
 
   const incomeItems = committedItems.filter((i) => i.type === 'income')
   const expenseItems = committedItems.filter((i) => i.type === 'expense')

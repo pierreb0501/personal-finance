@@ -5,6 +5,7 @@ import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
 import { StatCard } from '@/components/StatCard'
 import { AccountRow } from '@/components/AccountRow'
 import { EmptyState } from '@/components/EmptyState'
+import { Card } from '@/components/Card'
 import { Landmark } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -65,7 +66,7 @@ export default async function NetWorthPage() {
       </div>
 
       {/* Accounts */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+      <Card>
         <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-2">
           Accounts
         </h3>
@@ -86,7 +87,7 @@ export default async function NetWorthPage() {
             )}
           </>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

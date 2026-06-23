@@ -2,6 +2,7 @@
 
 import { getHeatmapStyle } from '@/lib/calendar'
 import { formatCAD } from '@/lib/format'
+import { getCategoryColor } from '@/lib/categories'
 import type { CalendarDay } from '@/lib/db/queries'
 
 type Props = {
@@ -48,7 +49,15 @@ export function CalendarDayCell({ date, day, maxAbsNetTotal, isToday, isSelected
       )}
 
       {hasExpectedOnly && (
-        <span className="absolute top-1.5 right-1.5 w-[7px] h-[7px] rounded-full bg-[#E8A23D]" />
+        <span className="absolute top-1.5 right-1.5 flex gap-[3px]">
+          {[...new Set(day!.expected.map((e) => getCategoryColor(e.category)))].map((color) => (
+            <span
+              key={color}
+              className="w-[7px] h-[7px] rounded-full flex-shrink-0"
+              style={{ background: color }}
+            />
+          ))}
+        </span>
       )}
     </button>
   )

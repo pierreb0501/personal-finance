@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Trash2, Plus, AlertTriangle, Loader2 } from 'lucide-react'
 import { removeAccount } from '@/app/actions'
+import { Card } from './Card'
 
 type Account = {
   id: string
@@ -48,7 +49,7 @@ export function AccountManager({ items: initialItems }: { items: Item[] }) {
 
   return (
     <div className="space-y-[18px]">
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] px-6 card-shadow card-rise">
+      <Card padding="x-only">
         <div className="flex items-center justify-between py-5 border-b border-[var(--hairline)]">
           <div>
             <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
@@ -135,7 +136,7 @@ export function AccountManager({ items: initialItems }: { items: Item[] }) {
             ))}
           </div>
         ))}
-      </div>
+      </Card>
     </div>
   )
 }

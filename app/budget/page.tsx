@@ -1,12 +1,14 @@
 import Link from 'next/link'
 import { TriangleAlert, ArrowRight } from 'lucide-react'
 import { db } from '@/lib/db'
-import { getCategoryBreakdown, getCategoryBudgets, getMerchantRules, getCustomCategories, getUnlabeledTransfers, seedBudgetFromPrevious } from '@/lib/db/queries'
+import { getCategoryBreakdown, getCategoryBudgets, getKnownCategories, getUnlabeledTransfers, seedBudgetFromPrevious } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { BudgetRow } from '@/components/BudgetRow'
 import { AddCategoryBudget } from '@/components/AddCategoryBudget'
 import { MonthSelector } from '@/components/MonthSelector'
+import { parseMonthParams } from '@/lib/month'
+import { Card } from '@/components/Card'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -18,10 +20,7 @@ export default async function BudgetPage({
 }: {
   searchParams: Promise<{ year?: string; month?: string }>
 }) {
-  const { year: yearStr, month: monthStr } = await searchParams
-  const now = new Date()
-  const year = yearStr ? Number(yearStr) : now.getFullYear()
-  const month = monthStr ? Number(monthStr) : now.getMonth() + 1
+  const { year, month } = parseMonthParams(await searchParams)
 
   // Auto-seed from previous month on first visit
   let budgets = await getCategoryBudgets(db, year, month)
@@ -31,8 +30,7 @@ export default async function BudgetPage({
   }
 
   const breakdown = await getCategoryBreakdown(db, year, month)
-  const rules = await getMerchantRules(db)
-  const customCats = await getCustomCategories(db)
+  const { knownCustomCategories } = await getKnownCategories(db)
   const unlabeledTransfers = await getUnlabeledTransfers(db, year, month)
 
   const plannedMap = new Map(budgets.map((b) => [b.category, b.planned]))
@@ -59,12 +57,6 @@ export default async function BudgetPage({
   const totalSpent = allCategories.reduce((s, c) => s + (spendMap.get(c) ?? 0), 0)
 
   // Categories not yet planned this month
-  const knownCustomCategories = [
-    ...new Set([
-      ...rules.map((r) => r.category),
-      ...customCats.map((c) => c.name),
-    ])
-  ]
   const allKnown = [...new Set([...Object.keys(CATEGORY_LABELS), ...knownCustomCategories])]
   const unplannedCategories = allKnown.filter((c) => !plannedMap.has(c))
 
@@ -102,15 +94,15 @@ export default async function BudgetPage({
       {/* Summary cards */}
       {totalPlanned > 0 && (
         <div className="grid grid-cols-3 gap-[18px] mb-[18px]">
-          <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-5 card-shadow card-rise">
+          <Card padding="sm">
             <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Planned</p>
             <p className="font-bold text-[26px] tracking-tight tabular-nums mt-1.5 text-[var(--ink)]">{formatCAD(totalPlanned)}</p>
-          </div>
-          <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-5 card-shadow card-rise">
+          </Card>
+          <Card padding="sm">
             <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
             <p className="font-bold text-[26px] tracking-tight tabular-nums mt-1.5 text-[var(--ink)]">{formatCAD(totalSpent)}</p>
-          </div>
-          <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-5 card-shadow card-rise">
+          </Card>
+          <Card padding="sm">
             <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">
               {totalPlanned - totalSpent >= 0 ? 'Remaining' : 'Over plan'}
             </p>
@@ -120,12 +112,12 @@ export default async function BudgetPage({
             ].join(' ')}>
               {formatCAD(Math.abs(totalPlanned - totalSpent))}
             </p>
-          </div>
+          </Card>
         </div>
       )}
 
       {/* Category plan list */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] px-6 card-shadow card-rise mb-[18px]">
+      <Card padding="x-only" className="mb-[18px]">
         <div className="flex items-center justify-between py-5 border-b border-[var(--hairline)]">
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
             {MONTH_NAMES[month - 1]} plan
@@ -150,16 +142,16 @@ export default async function BudgetPage({
             />
           ))
         )}
-      </div>
+      </Card>
 
       {/* Add category to plan */}
       {unplannedCategories.length > 0 && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
             Add to plan
           </h3>
           <AddCategoryBudget categories={unplannedCategories} year={year} month={month} />
-        </div>
+        </Card>
       )}
     </div>
   )

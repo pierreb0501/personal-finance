@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
+import { ChartTooltipCard } from '@/components/ChartTooltipCard'
 
 type MonthData = {
   label: string
@@ -24,7 +25,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   if (!active || !payload?.length) return null
   const total = payload.reduce((s, p) => s + p.value, 0)
   return (
-    <div className="bg-white border border-[var(--hairline)] rounded-[10px] px-3 py-2 text-[13px] shadow-md min-w-[160px]">
+    <ChartTooltipCard className="min-w-[160px]">
       <p className="font-semibold text-[var(--ink)] mb-1">{label} — {formatCAD(total)}</p>
       {[...payload].reverse().map((p) => (
         <div key={p.name} className="flex items-center justify-between gap-4">
@@ -35,7 +36,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
           <span className="tabular-nums text-[var(--ink)]">{formatCAD(p.value)}</span>
         </div>
       ))}
-    </div>
+    </ChartTooltipCard>
   )
 }
 

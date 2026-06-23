@@ -6,6 +6,7 @@ import { RangeToggle } from './RangeToggle'
 import { AreaChartWidget } from './AreaChartWidget'
 import { formatCAD } from '@/lib/format'
 import { EmptyState } from './EmptyState'
+import { Card } from './Card'
 
 type Snapshot = {
   date: string
@@ -48,10 +49,10 @@ export function NetWorthHeroCard({
 
   if (!latest) {
     return (
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+      <Card>
         <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">{label}</p>
         <EmptyState message="Connect an account and sync to see your net worth" />
-      </div>
+      </Card>
     )
   }
 
@@ -65,7 +66,7 @@ export function NetWorthHeroCard({
   const chartData = filtered.map((s) => ({ date: s.date, value: s[valueKey] }))
 
   return (
-    <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+    <Card>
       <div className="flex items-center justify-between gap-4">
         <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">{label}</p>
         <RangeToggle options={[...RANGES]} value={range} onChange={(v) => setRange(v as Range)} />
@@ -92,6 +93,6 @@ export function NetWorthHeroCard({
       )}
 
       <AreaChartWidget data={chartData} color={color} gradientId={gradientId} height={150} />
-    </div>
+    </Card>
   )
 }

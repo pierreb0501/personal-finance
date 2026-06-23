@@ -140,10 +140,14 @@ export async function addCommittedIncomeItem(
   category: string,
   expectedDay?: number,
   merchantName?: string,
+  intervalMonths?: number,
+  anchorYear?: number,
+  anchorMonth?: number,
 ): Promise<void> {
-  dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName)
+  dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth)
   revalidatePath('/spending')
   revalidatePath('/recurring')
+  revalidatePath('/calendar')
 }
 
 export async function addCommittedExpenseItem(
@@ -152,10 +156,14 @@ export async function addCommittedExpenseItem(
   category: string,
   expectedDay?: number,
   merchantName?: string,
+  intervalMonths?: number,
+  anchorYear?: number,
+  anchorMonth?: number,
 ): Promise<void> {
-  dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName)
+  dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth)
   revalidatePath('/spending')
   revalidatePath('/recurring')
+  revalidatePath('/calendar')
 }
 
 export async function deleteCommittedItem(id: string): Promise<void> {

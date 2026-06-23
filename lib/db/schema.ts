@@ -121,6 +121,12 @@ export const committedItems = sqliteTable('committed_items', {
   category: text('category').notNull(),
   groupName: text('group_name'),
   createdAt: integer('created_at').notNull(),
+  // Cadence: how often this item recurs. Default 1 = every month (existing behaviour).
+  // Values > 1 require anchorYear + anchorMonth to establish the reference month
+  // from which due months are computed: due when (Y*12+M - anchorY*12-anchorM) % intervalMonths === 0
+  intervalMonths: integer('interval_months').notNull().default(1),
+  anchorYear: integer('anchor_year'),    // nullable — only required when intervalMonths > 1
+  anchorMonth: integer('anchor_month'),  // nullable — 1-indexed
 })
 
 export const recurringMerchantGroups = sqliteTable('recurring_merchant_groups', {

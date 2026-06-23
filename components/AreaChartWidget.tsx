@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { formatCAD } from '@/lib/format'
+import { ChartTooltipCard } from '@/components/ChartTooltipCard'
 
 type DataPoint = { date: string; value: number }
 
@@ -21,9 +22,9 @@ type Props = {
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: { value: number }[] }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="bg-white border border-[var(--hairline)] rounded-[10px] px-3 py-2 text-[13px] shadow-md">
+    <ChartTooltipCard>
       <p className="font-semibold tabular-nums text-[var(--ink)]">{formatCAD(payload[0].value)}</p>
-    </div>
+    </ChartTooltipCard>
   )
 }
 

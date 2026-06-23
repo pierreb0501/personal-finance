@@ -7,12 +7,11 @@ import {
   getCategoryBreakdown,
   getAllHoldings,
   getRecentTransactions,
-  getMerchantRules,
   getSetting,
   getAllAccounts,
   getUnlabeledTransfers,
   getCreditCardBalances,
-  getCustomCategories,
+  getKnownCategories,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
@@ -22,6 +21,7 @@ import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
+import { Card } from '@/components/Card'
 import { PlusIcon, ArrowRight, TriangleAlert } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
@@ -50,7 +50,7 @@ export default async function OverviewPage() {
   const categories = await getCategoryBreakdown(db)
   const holdings = await getAllHoldings(db)
   const transactions = await getRecentTransactions(db, 4)
-  const rules = await getMerchantRules(db)
+  const { rules, knownCustomCategories } = await getKnownCategories(db)
   const accounts = await getAllAccounts(db)
   const unlabeledTransfers = await getUnlabeledTransfers(db)
   const cardBalances = await getCreditCardBalances(db)
@@ -81,13 +81,6 @@ export default async function OverviewPage() {
   // Today's investments delta (last 2 snapshots)
   const prevSnapshot = history.length >= 2 ? history[history.length - 2] : null
   const investDelta = prevSnapshot ? investmentsVal - prevSnapshot.investmentsValue : null
-
-  // Known custom categories from rules and the custom categories table
-  const customCats = await getCustomCategories(db)
-  const knownCustomCategories = [...new Set([
-    ...rules.map((r) => r.category),
-    ...customCats.map((c) => c.name),
-  ])]
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -132,7 +125,7 @@ export default async function OverviewPage() {
         <NetWorthHeroCard latest={latest} history={history} />
 
         {/* This Month + Investments */}
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">This month</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
             {formatCAD(monthlySpend)}
@@ -170,12 +163,12 @@ export default async function OverviewPage() {
               {investDelta >= 0 ? '▲' : '▼'} {investDelta >= 0 ? '+' : ''}{formatCAD(investDelta)} today
             </span>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Card balances */}
       {cardBalances.length > 0 && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+        <Card className="mb-[18px]">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
@@ -195,13 +188,13 @@ export default async function OverviewPage() {
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Row 2: Allocation donut + Recent activity */}
       <div className="grid gap-[18px]" style={{ gridTemplateColumns: '1fr 1.6fr' }}>
         {/* Allocation */}
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
             Allocation
           </h3>
@@ -211,10 +204,10 @@ export default async function OverviewPage() {
           ) : (
             <EmptyState message="Connect accounts to see allocation" />
           )}
-        </div>
+        </Card>
 
         {/* Recent activity */}
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <div className="flex items-center justify-between mb-1">
             <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
               Recent activity
@@ -240,7 +233,7 @@ export default async function OverviewPage() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   )

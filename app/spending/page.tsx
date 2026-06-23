@@ -3,16 +3,16 @@ import {
   getMonthlySpend,
   getCategoryBreakdown,
   getTransactionsForMonth,
-  getMerchantRules,
   getSetting,
   getCategoryBudgets,
-  getCustomCategories,
+  getKnownCategories,
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
   getSpendByAccount,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
+import { parseMonthParams } from '@/lib/month'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
 import { ProgressBar } from '@/components/ProgressBar'
@@ -22,6 +22,7 @@ import { TransactionList } from '@/components/TransactionList'
 import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
+import { Card } from '@/components/Card'
 import { Receipt } from 'lucide-react'
 import AmexImportButton from '@/components/AmexImportButton'
 
@@ -35,17 +36,15 @@ export default async function SpendingPage({
 }: {
   searchParams: Promise<{ year?: string; month?: string }>
 }) {
-  const { year: yearStr, month: monthStr } = await searchParams
+  const { year, month } = parseMonthParams(await searchParams)
   const now = new Date()
-  const year = yearStr ? Number(yearStr) : now.getFullYear()
-  const month = monthStr ? Number(monthStr) : now.getMonth() + 1
 
   const spend = await getMonthlySpend(db, year, month)
   const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
   const categories = await getCategoryBreakdown(db, year, month)
   const spendByAccount = await getSpendByAccount(db, year, month)
   const transactions = await getTransactionsForMonth(db, year, month)
-  const rules = await getMerchantRules(db)
+  const { rules, knownCustomCategories } = await getKnownCategories(db)
   const budgets = await getCategoryBudgets(db, year, month)
   const budgetMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const committedItems = await getCommittedItemsWithStatus(db, year, month)
@@ -89,12 +88,6 @@ export default async function SpendingPage({
     ...m,
     breakdown: m.breakdown.filter((b) => !incomeCategories.has(b.category)),
   }))
-  const customCats = await getCustomCategories(db)
-  const knownCustomCategories = [...new Set([
-    ...rules.map((r) => r.category),
-    ...customCats.map((c) => c.name),
-  ])]
-
   // Unlabeled transfers: category is still TRANSFER_IN or TRANSFER_OUT (meaning no customCategory applied)
   const unlabeledTransfers = transactions.filter(
     (tx) => (tx.category === 'TRANSFER_IN' || tx.category === 'TRANSFER_OUT') && !tx.ignored
@@ -120,14 +113,14 @@ export default async function SpendingPage({
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-[18px] mb-[18px]">
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
             {formatCAD(spend)}
           </p>
-        </div>
+        </Card>
 
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Income</p>
           {income > 0 ? (
             <>
@@ -144,14 +137,14 @@ export default async function SpendingPage({
           ) : (
             <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--faint)]">—</p>
           )}
-        </div>
+        </Card>
 
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Allowance</p>
           <AllowanceEditor allowance={allowance} />
-        </div>
+        </Card>
 
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           {savings !== null ? (
             <>
               <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Saved</p>
@@ -182,11 +175,11 @@ export default async function SpendingPage({
               </p>
             </>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Budget progress */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+      <Card className="mb-[18px]">
         <div className="flex items-center justify-between mb-3">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Budget used</p>
           <span className="font-bold tabular-nums text-[14px] text-[var(--ink)]">
@@ -194,11 +187,11 @@ export default async function SpendingPage({
           </span>
         </div>
         <ProgressBar value={spendRatio} />
-      </div>
+      </Card>
 
       {/* Month-end predictor */}
       {projectedSpend !== null && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+        <Card className="mb-[18px]">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Month-end forecast</p>
@@ -228,29 +221,29 @@ export default async function SpendingPage({
               )}
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Category breakdown */}
       {spendingCategories.length === 0 ? (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <EmptyState
             icon={Receipt}
             message="No transactions this month"
             subMessage="Sync your accounts or navigate to a different month"
           />
-        </div>
+        </Card>
       ) : (
         <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1fr 1.4fr' }}>
-          <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+          <Card>
             <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
               By category
             </h3>
             <p className="text-[13px] text-[var(--muted-text)] mt-0.5 mb-4">This month</p>
             <DonutChart segments={donutSegments} />
-          </div>
+          </Card>
 
-          <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+          <Card>
             <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
               Category breakdown
             </h3>
@@ -266,13 +259,13 @@ export default async function SpendingPage({
                 />
               ))}
             </div>
-          </div>
+          </Card>
         </div>
       )}
 
       {/* Spend by account */}
       {spendByAccount.length > 0 && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+        <Card className="mb-[18px]">
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
             By account
           </h3>
@@ -296,17 +289,17 @@ export default async function SpendingPage({
               )
             })}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 6-month trend */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+      <Card className="mb-[18px]">
         <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
           Spending trend
         </h3>
         <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by category</p>
         <SpendingTrendChart months={trendMonths} />
-      </div>
+      </Card>
 
       {/* Unlabeled transfers alert */}
       <TransferAlert
@@ -317,7 +310,7 @@ export default async function SpendingPage({
 
       {/* Transactions table */}
       {transactions.length > 0 && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+        <Card>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
             Transactions
           </h3>
@@ -326,7 +319,7 @@ export default async function SpendingPage({
             rules={rules}
             knownCustomCategories={knownCustomCategories}
           />
-        </div>
+        </Card>
       )}
     </div>
   )

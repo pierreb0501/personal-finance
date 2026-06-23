@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Trash2, Plus } from 'lucide-react'
 import { getCategoryColor, getCategoryLabel, slugifyCategory } from '@/lib/categories'
 import { addCustomCategory, deleteCustomCategory } from '@/app/actions'
+import { Card } from './Card'
 
 type CustomCategory = {
   id: string
@@ -56,7 +57,7 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
   return (
     <div className="space-y-[18px]">
       {/* Add new custom category */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+      <Card>
         <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
           Add category
         </h3>
@@ -85,11 +86,11 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
           </button>
         </div>
         {error && <p className="text-[12px] text-[var(--negative)] mt-2">{error}</p>}
-      </div>
+      </Card>
 
       {/* Custom categories */}
       {customs.length > 0 && (
-        <div className="bg-white rounded-[18px] border border-[var(--hairline)] px-6 card-shadow card-rise">
+        <Card padding="x-only">
           <div className="py-5 border-b border-[var(--hairline)]">
             <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
               Custom categories
@@ -117,11 +118,11 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
               </div>
             )
           })}
-        </div>
+        </Card>
       )}
 
       {/* Built-in categories */}
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] px-6 card-shadow card-rise">
+      <Card padding="x-only">
         <div className="py-5 border-b border-[var(--hairline)]">
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
             Built-in categories
@@ -138,7 +139,7 @@ export function CategoryManager({ builtins, customs: initialCustoms }: Props) {
             </div>
           )
         })}
-      </div>
+      </Card>
     </div>
   )
 }

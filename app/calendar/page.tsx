@@ -1,7 +1,9 @@
 import { db } from '@/lib/db'
-import { getCalendarMonth, getMerchantRules, getCustomCategories } from '@/lib/db/queries'
+import { getCalendarMonth, getKnownCategories } from '@/lib/db/queries'
 import { MonthSelector } from '@/components/MonthSelector'
 import { CalendarGrid } from '@/components/CalendarGrid'
+import { parseMonthParams } from '@/lib/month'
+import { Card } from '@/components/Card'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -13,18 +15,10 @@ export default async function CalendarPage({
 }: {
   searchParams: Promise<{ year?: string; month?: string }>
 }) {
-  const { year: yearStr, month: monthStr } = await searchParams
-  const now = new Date()
-  const year = yearStr ? Number(yearStr) : now.getFullYear()
-  const month = monthStr ? Number(monthStr) : now.getMonth() + 1
+  const { year, month } = parseMonthParams(await searchParams)
 
   const calendar = await getCalendarMonth(db, year, month)
-  const rules = await getMerchantRules(db)
-  const customCats = await getCustomCategories(db)
-  const knownCustomCategories = [...new Set([
-    ...rules.map((r) => r.category),
-    ...customCats.map((c) => c.name),
-  ])]
+  const { rules, knownCustomCategories } = await getKnownCategories(db)
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -48,11 +42,15 @@ export default async function CalendarPage({
           <span className="w-2.5 h-2.5 rounded-full bg-[var(--negative)]" /> Net loss day
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-[#E8A23D]" /> Upcoming expected item
+          <span className="inline-flex gap-[3px]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#3B82F6]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
+          </span>
+          Upcoming expected items (by category)
         </span>
       </div>
 
-      <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+      <Card>
         <CalendarGrid
           year={year}
           month={month}
@@ -60,7 +58,7 @@ export default async function CalendarPage({
           rules={rules}
           knownCustomCategories={knownCustomCategories}
         />
-      </div>
+      </Card>
     </div>
   )
 }

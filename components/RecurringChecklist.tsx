@@ -16,6 +16,7 @@ import {
   setMerchantGroup,
 } from '@/app/actions'
 import type { CommittedItemWithStatus, RecurringMerchantWithStatus } from '@/lib/db/queries'
+import { Card } from '@/components/Card'
 
 type Props = {
   incomeItems: CommittedItemWithStatus[]
@@ -25,6 +26,27 @@ type Props = {
 }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTH_NAMES_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+const INTERVAL_OPTIONS = [
+  { label: 'Every month', value: 1 },
+  { label: 'Every 2 months', value: 2 },
+  { label: 'Every 3 months (quarterly)', value: 3 },
+  { label: 'Every 6 months (semi-annual)', value: 6 },
+  { label: 'Every 12 months (annual)', value: 12 },
+]
+
+function cadenceLabel(intervalMonths: number, anchorYear: number | null, anchorMonth: number | null): string {
+  if (intervalMonths <= 1) return 'every month'
+  const suffix = anchorYear && anchorMonth
+    ? `, next ${MONTHS[anchorMonth - 1]} ${anchorYear}`
+    : ''
+  if (intervalMonths === 2) return `every 2 months${suffix}`
+  if (intervalMonths === 3) return `quarterly${suffix}`
+  if (intervalMonths === 6) return `every 6 months${suffix}`
+  if (intervalMonths === 12) return `annually${suffix}`
+  return `every ${intervalMonths} months${suffix}`
+}
 
 function formatDate(dateStr: string): string {
   const [, m, d] = dateStr.split('-').map(Number)
@@ -221,6 +243,9 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
   const [day, setDay] = useState('')
   const [merchant, setMerchant] = useState('')
   const [category, setCategory] = useState('INCOME')
+  const [intervalMonths, setIntervalMonths] = useState(1)
+  const [anchorMonth, setAnchorMonth] = useState<number>(new Date().getMonth() + 1)
+  const [anchorYear, setAnchorYear] = useState<number>(new Date().getFullYear())
   const [pending, setPending] = useState(false)
   const cats = allCategories(knownCustomCategories)
 
@@ -229,8 +254,14 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
     const amt = parseFloat(amount)
     if (isNaN(amt) || amt <= 0) return
     const dayNum = day ? Math.min(31, Math.max(1, Number(day))) : undefined
+    const isMulti = intervalMonths > 1
     setPending(true)
-    await addCommittedIncomeItem(name.trim(), amt, category, dayNum, merchant.trim() || undefined)
+    await addCommittedIncomeItem(
+      name.trim(), amt, category, dayNum, merchant.trim() || undefined,
+      isMulti ? intervalMonths : undefined,
+      isMulti ? anchorYear : undefined,
+      isMulti ? anchorMonth : undefined,
+    )
     setPending(false)
     onDone()
   }
@@ -256,6 +287,22 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
           {cats.map((c) => <option key={c} value={c}>{getCategoryLabel(c)}</option>)}
         </select>
+        <select value={intervalMonths} onChange={(e) => setIntervalMonths(Number(e.target.value))}
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+          {INTERVAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {intervalMonths > 1 && (
+          <div className="col-span-2 flex gap-2">
+            <select value={anchorMonth} onChange={(e) => setAnchorMonth(Number(e.target.value))}
+              className="flex-1 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+              {MONTH_NAMES_FULL.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+            <input type="number" value={anchorYear} onChange={(e) => setAnchorYear(Number(e.target.value))}
+              min={2020} max={2100} placeholder="Year"
+              className="w-24 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none" />
+            <p className="self-center text-[11px] text-[var(--faint)] shrink-0">= first due month</p>
+          </div>
+        )}
       </div>
       <div className="flex gap-2">
         <button onClick={handle} disabled={pending || !name.trim() || !amount}
@@ -291,7 +338,14 @@ function IncomeRow({ item, knownGroups }: { item: CommittedItemWithStatus; known
               {getCategoryLabel(item.category)}
             </span>
             {item.expectedDay && (
-              <span className="text-[11px] text-[var(--faint)]">· {ordinal(item.expectedDay)} of each month</span>
+              <span className="text-[11px] text-[var(--faint)]">
+                · {ordinal(item.expectedDay)}, {cadenceLabel(item.intervalMonths, item.anchorYear, item.anchorMonth)}
+              </span>
+            )}
+            {!item.expectedDay && item.intervalMonths > 1 && (
+              <span className="text-[11px] text-[var(--faint)]">
+                · {cadenceLabel(item.intervalMonths, item.anchorYear, item.anchorMonth)}
+              </span>
             )}
             {item.merchantName && (
               <span className="text-[11px] text-[var(--faint)]">· matches "{item.merchantName}"</span>
@@ -349,7 +403,7 @@ function IncomeSection({ items, knownCustomCategories }: { items: CommittedItemW
   }
 
   return (
-    <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise mb-[18px]">
+    <Card className="mb-[18px]">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">Recurring Income</h3>
@@ -398,7 +452,7 @@ function IncomeSection({ items, knownCustomCategories }: { items: CommittedItemW
         </div>
       )}
       {showForm && <AddIncomeForm knownCustomCategories={knownCustomCategories} onDone={() => setShowForm(false)} />}
-    </div>
+    </Card>
   )
 }
 
@@ -461,6 +515,9 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
   const [day, setDay] = useState('')
   const [merchant, setMerchant] = useState('')
   const [category, setCategory] = useState('RENT_AND_UTILITIES')
+  const [intervalMonths, setIntervalMonths] = useState(1)
+  const [anchorMonth, setAnchorMonth] = useState<number>(new Date().getMonth() + 1)
+  const [anchorYear, setAnchorYear] = useState<number>(new Date().getFullYear())
   const [pending, setPending] = useState(false)
   const cats = allCategories(knownCustomCategories)
 
@@ -469,8 +526,14 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
     const amt = parseFloat(amount)
     if (isNaN(amt) || amt <= 0) return
     const dayNum = day ? Math.min(31, Math.max(1, Number(day))) : undefined
+    const isMulti = intervalMonths > 1
     setPending(true)
-    await addCommittedExpenseItem(name.trim(), amt, category, dayNum, merchant.trim() || undefined)
+    await addCommittedExpenseItem(
+      name.trim(), amt, category, dayNum, merchant.trim() || undefined,
+      isMulti ? intervalMonths : undefined,
+      isMulti ? anchorYear : undefined,
+      isMulti ? anchorMonth : undefined,
+    )
     setPending(false)
     onDone()
   }
@@ -493,6 +556,22 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
           {cats.map((c) => <option key={c} value={c}>{getCategoryLabel(c)}</option>)}
         </select>
+        <select value={intervalMonths} onChange={(e) => setIntervalMonths(Number(e.target.value))}
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+          {INTERVAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {intervalMonths > 1 && (
+          <div className="col-span-2 flex gap-2">
+            <select value={anchorMonth} onChange={(e) => setAnchorMonth(Number(e.target.value))}
+              className="flex-1 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+              {MONTH_NAMES_FULL.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+            <input type="number" value={anchorYear} onChange={(e) => setAnchorYear(Number(e.target.value))}
+              min={2020} max={2100} placeholder="Year"
+              className="w-24 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none" />
+            <p className="self-center text-[11px] text-[var(--faint)] shrink-0">= first due month</p>
+          </div>
+        )}
       </div>
       <div className="flex gap-2">
         <button onClick={handle} disabled={pending || !name.trim() || !amount}
@@ -575,7 +654,16 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
             </div>
             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className="text-[11px]" style={{ color: getCategoryColor(d.category) }}>{getCategoryLabel(d.category)}</span>
-              {d.expectedDay && <span className="text-[11px] text-[var(--faint)]">· {ordinal(d.expectedDay)} of each month</span>}
+              {d.expectedDay && (
+                <span className="text-[11px] text-[var(--faint)]">
+                  · {ordinal(d.expectedDay)}, {cadenceLabel(d.intervalMonths, d.anchorYear, d.anchorMonth)}
+                </span>
+              )}
+              {!d.expectedDay && d.intervalMonths > 1 && (
+                <span className="text-[11px] text-[var(--faint)]">
+                  · {cadenceLabel(d.intervalMonths, d.anchorYear, d.anchorMonth)}
+                </span>
+              )}
               {d.merchantName && <span className="text-[11px] text-[var(--faint)]">· matches "{d.merchantName}"</span>}
             </div>
           </div>
@@ -692,7 +780,7 @@ function ChargesSection({ expenseItems, chargeItems, knownCustomCategories }: {
   const hasAnything = all.length > 0 || showExpenseForm || showChargeForm
 
   return (
-    <div className="bg-white rounded-[18px] border border-[var(--hairline)] p-6 card-shadow card-rise">
+    <Card>
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">Recurring Charges</h3>
@@ -770,7 +858,7 @@ function ChargesSection({ expenseItems, chargeItems, knownCustomCategories }: {
 
       {showExpenseForm && <AddExpenseForm knownCustomCategories={knownCustomCategories} onDone={() => setShowExpenseForm(false)} />}
       {showChargeForm && <AddAutoChargeForm knownCustomCategories={knownCustomCategories} onDone={() => setShowChargeForm(false)} />}
-    </div>
+    </Card>
   )
 }
 
