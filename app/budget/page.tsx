@@ -3,6 +3,7 @@ import { TriangleAlert, ArrowRight } from 'lucide-react'
 import { db } from '@/lib/db'
 import { getCategoryBreakdown, getCategoryBudgets, getKnownCategories, getUnlabeledTransfers, seedBudgetFromPrevious } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
+import { CategoryAllocationChart } from '@/components/CategoryAllocationChart'
 import { formatCAD } from '@/lib/format'
 import { BudgetRow } from '@/components/BudgetRow'
 import { AddCategoryBudget } from '@/components/AddCategoryBudget'
@@ -115,6 +116,30 @@ export default async function BudgetPage({
           </Card>
         </div>
       )}
+
+      {/* Allocation breakdown — planned % vs actual % */}
+      {(() => {
+        const chartSegments = allCategories
+          .filter((c) => (plannedMap.get(c) ?? 0) > 0 || (spendMap.get(c) ?? 0) > 0)
+          .map((c) => ({
+            category: c,
+            label: getCategoryLabel(c),
+            color: getCategoryColor(c),
+            plannedAmount: plannedMap.get(c) ?? 0,
+            actualAmount: Math.max(spendMap.get(c) ?? 0, 0),
+          }))
+        // Don't render an empty "By category" card when nothing has a plan or spend
+        if (chartSegments.length === 0) return null
+        return (
+          <Card className="mb-[18px]">
+            <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
+              By category
+            </h3>
+            <p className="text-[13px] text-[var(--muted-text)] mt-0.5 mb-5">Planned vs actual share of spending</p>
+            <CategoryAllocationChart segments={chartSegments} />
+          </Card>
+        )
+      })()}
 
       {/* Category plan list */}
       <Card padding="x-only" className="mb-[18px]">
