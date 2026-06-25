@@ -16,7 +16,7 @@ jest.mock('@/lib/plaid', () => ({
 }))
 
 import { plaidClient } from '@/lib/plaid'
-import { syncAll, syncItem } from '@/lib/sync'
+import { syncAll, syncItem, syncSingleItem } from '@/lib/sync'
 
 // Uses the same libsql driver as production (just pointed at a throwaway
 // temp file), rather than better-sqlite3 — the two drivers disagree on
@@ -247,5 +247,54 @@ describe('syncItem', () => {
 
     updatedItem = (await db.select().from(schema.items).get())!
     expect(updatedItem.status).toBe('ok')
+  })
+
+  // syncSingleItem is the webhook entry point. It must behave exactly like one
+  // iteration of syncAll's loop plus the post-sync work — not a degraded sync.
+  describe('syncSingleItem (webhook path)', () => {
+    it('runs post-sync work (writes a snapshot) for a single item', async () => {
+      const item = await seedItem(db)
+
+      mockedPlaid.accountsGet.mockResolvedValue({
+        data: {
+          accounts: [{
+            account_id: 'plaid-acc-1', name: 'Chequing', type: 'depository',
+            subtype: 'checking', balances: { current: 5000, available: 4800 },
+            iso_currency_code: 'CAD',
+          }],
+        },
+      } as any)
+      mockedPlaid.transactionsSync.mockResolvedValue({
+        data: { added: [], modified: [], removed: [], next_cursor: 'c1', has_more: false },
+      } as any)
+      mockedPlaid.investmentsHoldingsGet.mockRejectedValue(new Error('not supported'))
+
+      await syncSingleItem(db, item)
+
+      const snaps = await db.select().from(schema.snapshots).all()
+      expect(snaps).toHaveLength(1)
+      expect(snaps[0].totalAssets).toBe(5000)
+
+      const updatedItem = (await db.select().from(schema.items).get())!
+      expect(updatedItem.status).toBe('ok')
+    })
+
+    it('marks the item login_required when Plaid asks for reconnect, without crashing', async () => {
+      const item = await seedItem(db)
+
+      mockedPlaid.accountsGet.mockRejectedValue(
+        Object.assign(new Error('login required'), { response: { data: { error_code: 'ITEM_LOGIN_REQUIRED' } } }),
+      )
+
+      // Must resolve (webhook caller relies on it never throwing)
+      await expect(syncSingleItem(db, item)).resolves.toBeUndefined()
+
+      const updatedItem = (await db.select().from(schema.items).get())!
+      expect(updatedItem.status).toBe('login_required')
+
+      // Post-sync work still runs even though the item failed
+      const snaps = await db.select().from(schema.snapshots).all()
+      expect(snaps).toHaveLength(1)
+    })
   })
 })

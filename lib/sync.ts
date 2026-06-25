@@ -14,29 +14,53 @@ export async function syncAll(db: DB = defaultDb) {
   const allItems = await db.select().from(schema.items).all()
   for (const item of allItems) {
     if (item.id === MANUAL_IMPORT_ITEM_ID) continue
-    try {
-      await syncItem(db, item)
-      if (item.status !== 'ok') {
-        await db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
-      }
-    } catch (err) {
-      console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
-      const plaidErrorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
-      // ITEM_LOGIN_REQUIRED needs the user to reconnect; the rest are transient
-      // (rate limits, Plaid still preparing data, etc.) so we just mark the item
-      // broken without claiming it needs a fresh login — the next sync retries it.
-      const status = plaidErrorCode === 'ITEM_LOGIN_REQUIRED'
-        ? 'login_required'
-        : plaidErrorCode
-          ? 'error'
-          : null
-      if (status) {
-        await db.update(schema.items).set({ status }).where(eq(schema.items.id, item.id)).run()
-      }
+    await syncItemReconcilingStatus(db, item)
+  }
+  await runPostSync(db)
+}
+
+// Sync one item and reconcile its status, swallowing errors so a single broken
+// item never aborts the others (when called from the syncAll loop) or crashes
+// the webhook. This is the only place item.status transitions on a sync.
+async function syncItemReconcilingStatus(db: DB, item: Item) {
+  try {
+    await syncItem(db, item)
+    // A previously broken item that now syncs cleanly is healthy again.
+    if (item.status !== 'ok') {
+      await db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
+    }
+  } catch (err) {
+    console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
+    const plaidErrorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
+    // ITEM_LOGIN_REQUIRED needs the user to reconnect; the rest are transient
+    // (rate limits, Plaid still preparing data, etc.) so we just mark the item
+    // broken without claiming it needs a fresh login — the next sync retries it.
+    const status = plaidErrorCode === 'ITEM_LOGIN_REQUIRED'
+      ? 'login_required'
+      : plaidErrorCode
+        ? 'error'
+        : null
+    if (status) {
+      await db.update(schema.items).set({ status }).where(eq(schema.items.id, item.id)).run()
     }
   }
-  await applyAllCategoryRules(db)  // Apply saved merchant rules to any newly synced transactions
-  await writeSnapshot(db)  // Once, after all items, so snapshot reflects complete state
+}
+
+// Account-wide work that must run after any sync, whether it covered every item
+// (syncAll) or just one (webhook): apply saved merchant rules to newly synced
+// transactions, then snapshot net worth so the chart reflects the new balances.
+async function runPostSync(db: DB) {
+  await applyAllCategoryRules(db)
+  await writeSnapshot(db)
+}
+
+// Webhook entry point: sync a single item end-to-end with the exact same status
+// reconciliation and post-processing syncAll applies, so a Plaid-triggered update
+// is never a second-class sync (missing category rules, snapshots, or status fix-ups).
+export async function syncSingleItem(db: DB = defaultDb, item: Item) {
+  if (item.id === MANUAL_IMPORT_ITEM_ID) return
+  await syncItemReconcilingStatus(db, item)
+  await runPostSync(db)
 }
 
 export async function syncItem(db: DB, item: Item) {

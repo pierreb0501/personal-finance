@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createHash } from 'crypto'
 import { decodeProtectedHeader, importJWK, jwtVerify } from 'jose'
 import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { items } from '@/lib/db/schema'
-import { syncItem } from '@/lib/sync'
+import { syncSingleItem } from '@/lib/sync'
 import { plaidClient } from '@/lib/plaid'
 
 // Plaid signs every webhook with a JWT in the Plaid-Verification header.
@@ -68,10 +69,17 @@ export async function POST(req: NextRequest) {
     (webhook_type === 'INVESTMENTS_TRANSACTIONS' && webhook_code === 'DEFAULT_UPDATE')
 
   if (shouldSync && item) {
-    // Fire-and-forget — return 200 immediately so Plaid doesn't retry.
-    // Sync errors are logged inside syncItem.
-    syncItem(db, item).catch((err: unknown) => {
-      console.error(`Webhook-triggered sync failed for item ${item.institutionName}:`, (err as Error).message)
+    // Return 200 immediately so Plaid doesn't retry, but run the sync via after()
+    // so the serverless function stays alive until it finishes. A bare
+    // fire-and-forget promise would be killed when the response is sent, leaving
+    // the sync half-done. The incremental sync can also outlast Plaid's webhook
+    // timeout, which is the other reason it can't run before the response.
+    after(async () => {
+      try {
+        await syncSingleItem(db, item)
+      } catch (err) {
+        console.error(`Webhook-triggered sync failed for item ${item.institutionName}:`, (err as Error).message)
+      }
     })
   }
 
