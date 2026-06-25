@@ -5,7 +5,11 @@ import { readSessionFromCookieHeader } from '@/lib/session'
 // only line of defense — it just pre-filters unauthenticated requests
 // before they reach a page or Route Handler). Page-level/DAL checks
 // (lib/dal.ts) and per-route checks in API handlers still apply.
-const PUBLIC_PATHS = ['/login']
+// /api/plaid/webhook is called by Plaid with no session cookie; it
+// authenticates the caller by verifying Plaid's JWT signature on the request
+// body, so the session gate must let it through (otherwise every webhook 401s
+// here before reaching the handler and sync silently never runs).
+const PUBLIC_PATHS = ['/login', '/api/plaid/webhook']
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -62,6 +66,14 @@ export async function proxy(req: NextRequest) {
 
   if (!session) {
     if (pathname.startsWith('/api')) {
+      // The cron sync authenticates with a Bearer CRON_SECRET (validated in the
+      // route itself), not a session cookie, so let it past the optimistic gate.
+      const isCronSync =
+        pathname === '/api/plaid/sync' &&
+        req.headers.get('authorization')?.startsWith('Bearer ')
+      if (isCronSync) {
+        return withCsp(NextResponse.next({ request: { headers: requestHeaders } }))
+      }
       return withCsp(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
     }
     const loginUrl = new URL('/login', req.nextUrl)

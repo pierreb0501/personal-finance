@@ -13,6 +13,16 @@ export async function requireAuth(): Promise<NextResponse | null> {
   return null
 }
 
+// Vercel Cron invocations carry no session cookie; instead Vercel sends the
+// CRON_SECRET env var as a Bearer token in the Authorization header. A route
+// that allows cron access checks for it here. Returns false when CRON_SECRET is
+// unset so cron auth can never silently succeed against an empty secret.
+export function isAuthorizedCron(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return false
+  return req.headers.get('authorization') === `Bearer ${secret}`
+}
+
 // Route Handlers (unlike Server Actions) get no automatic CSRF protection
 // from Next.js, so state-changing routes verify the Origin header matches
 // the Host header themselves — the same check Next.js applies to Server
