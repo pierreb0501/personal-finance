@@ -15,7 +15,6 @@ import {
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
-import SyncButton from '@/components/SyncButton'
 import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
 import { ProgressBar } from '@/components/ProgressBar'
 import { DonutChart } from '@/components/DonutChart'
@@ -92,16 +91,13 @@ export default async function OverviewPage() {
           </h1>
           <p className="text-[14px] text-[var(--muted-text)] mt-1">{formatDate()}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/connect"
-            className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[var(--muted-text)] bg-white border border-[var(--hairline)] rounded-[10px] hover:bg-[#f5f2ec] transition-colors"
-          >
-            <PlusIcon size={13} />
-            Add account
-          </Link>
-          <SyncButton />
-        </div>
+        <Link
+          href="/connect"
+          className="flex items-center gap-1.5 px-3 py-2 text-[13px] font-medium text-[var(--muted-text)] bg-white border border-[var(--hairline)] rounded-[10px] hover:bg-[#f5f2ec] transition-colors"
+        >
+          <PlusIcon size={13} />
+          Add account
+        </Link>
       </div>
 
       {/* Unlabeled transfers alert */}

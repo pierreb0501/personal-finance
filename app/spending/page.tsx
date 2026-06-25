@@ -1,30 +1,22 @@
 import { db } from '@/lib/db'
 import {
   getMonthlySpend,
-  getCategoryBreakdown,
   getTransactionsForMonth,
   getSetting,
-  getCategoryBudgets,
   getKnownCategories,
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
   getSpendByAccount,
 } from '@/lib/db/queries'
-import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { parseMonthParams } from '@/lib/month'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
 import { ProgressBar } from '@/components/ProgressBar'
-import { DonutChart } from '@/components/DonutChart'
-import { CategoryBar } from '@/components/CategoryBar'
 import { TransactionList } from '@/components/TransactionList'
-import { EmptyState } from '@/components/EmptyState'
 import { TransferAlert } from '@/components/TransferAlert'
 import { SpendingTrendChart } from '@/components/SpendingTrendChart'
 import { Card } from '@/components/Card'
-import { Receipt } from 'lucide-react'
-import AmexImportButton from '@/components/AmexImportButton'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -41,12 +33,9 @@ export default async function SpendingPage({
 
   const spend = await getMonthlySpend(db, year, month)
   const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
-  const categories = await getCategoryBreakdown(db, year, month)
   const spendByAccount = await getSpendByAccount(db, year, month)
   const transactions = await getTransactionsForMonth(db, year, month)
   const { rules, knownCustomCategories } = await getKnownCategories(db)
-  const budgets = await getCategoryBudgets(db, year, month)
-  const budgetMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const committedItems = await getCommittedItemsWithStatus(db, year, month)
   const incomeItems = committedItems.filter((i) => i.type === 'income')
   const incomeCategories = new Set(incomeItems.map((i) => i.category))
@@ -71,18 +60,6 @@ export default async function SpendingPage({
     ? (projectedSavings / income) * 100
     : null
 
-  // Exclude negative-total categories and recurring income categories from donut/breakdown
-  const donutSegments = categories
-    .filter((c) => c.total > 0 && !incomeCategories.has(c.category))
-    .map((c) => ({
-      label: getCategoryLabel(c.category),
-      value: c.total,
-      color: getCategoryColor(c.category),
-    }))
-
-  const spendingCategories = categories.filter((c) => !incomeCategories.has(c.category))
-  const maxCategoryTotal = spendingCategories[0]?.total ?? 0
-
   const trendMonthsRaw = await getCategoryTrendMonths(db, 6)
   const trendMonths = trendMonthsRaw.map((m) => ({
     ...m,
@@ -106,7 +83,6 @@ export default async function SpendingPage({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <AmexImportButton />
           <MonthSelector year={year} month={month} />
         </div>
       </div>
@@ -222,45 +198,6 @@ export default async function SpendingPage({
             </div>
           </div>
         </Card>
-      )}
-
-      {/* Category breakdown */}
-      {spendingCategories.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={Receipt}
-            message="No transactions this month"
-            subMessage="Sync your accounts or navigate to a different month"
-          />
-        </Card>
-      ) : (
-        <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1fr 1.4fr' }}>
-          <Card>
-            <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
-              By category
-            </h3>
-            <p className="text-[13px] text-[var(--muted-text)] mt-0.5 mb-4">This month</p>
-            <DonutChart segments={donutSegments} />
-          </Card>
-
-          <Card>
-            <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)] mb-4">
-              Category breakdown
-            </h3>
-            <div className="space-y-4">
-              {spendingCategories.map((cat) => (
-                <CategoryBar
-                  key={cat.category}
-                  category={cat.category}
-                  amount={cat.total}
-                  share={maxCategoryTotal > 0 ? cat.total / maxCategoryTotal : 0}
-                  color={getCategoryColor(cat.category)}
-                  limit={budgetMap.get(cat.category)}
-                />
-              ))}
-            </div>
-          </Card>
-        </div>
       )}
 
       {/* Spend by account */}
