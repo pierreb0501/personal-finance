@@ -1283,3 +1283,35 @@ export async function recordFailedLoginAttempt(db: DB, ip: string): Promise<void
 export async function clearLoginAttempts(db: DB, ip: string): Promise<void> {
   await db.delete(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).run()
 }
+
+// ─── Investment Transactions ──────────────────────────────────────────────────
+
+export async function getInvestmentTransactions(db: DB, limit = 100) {
+  return db
+    .select()
+    .from(schema.investmentTransactions)
+    .orderBy(desc(schema.investmentTransactions.date))
+    .limit(limit)
+    .all()
+}
+
+export async function getInvestmentSummary(db: DB) {
+  const rows = await db
+    .select()
+    .from(schema.investmentTransactions)
+    .all()
+
+  let dividends = 0
+  let contributions = 0
+  let withdrawals = 0
+
+  for (const r of rows) {
+    const t = r.type.toLowerCase()
+    const sub = (r.subtype ?? '').toLowerCase()
+    if (t === 'dividend' || sub === 'dividend') dividends += r.amount
+    else if (t === 'cash' && r.amount < 0) contributions += Math.abs(r.amount)
+    else if (t === 'cash' && r.amount > 0) withdrawals += r.amount
+  }
+
+  return { dividends, contributions, withdrawals }
+}

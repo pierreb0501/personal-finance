@@ -134,6 +134,25 @@ export const recurringMerchantGroups = sqliteTable('recurring_merchant_groups', 
   groupName: text('group_name').notNull(),
 })
 
+export const investmentTransactions = sqliteTable('investment_transactions', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull().references(() => accounts.id),
+  securityName: text('security_name'),
+  tickerSymbol: text('ticker_symbol'),
+  type: text('type').notNull(),
+  subtype: text('subtype'),
+  amount: real('amount').notNull(),
+  quantity: real('quantity'),
+  price: real('price'),
+  fees: real('fees'),
+  date: text('date').notNull(),
+  isoCurrencyCode: text('iso_currency_code').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => [
+  index('inv_tx_account_id_idx').on(table.accountId),
+  index('inv_tx_date_idx').on(table.date),
+])
+
 // Tracks failed login attempts per source IP for rate limiting. DB-backed
 // (rather than in-memory) so the limit holds even across serverless cold
 // starts / multiple instances.

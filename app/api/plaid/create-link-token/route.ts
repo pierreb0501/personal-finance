@@ -39,9 +39,10 @@ export async function POST(req: NextRequest) {
         access_token: item.accessToken,
         language: 'en',
         country_codes: [CountryCode.Ca, CountryCode.Us],
-        ...(process.env.NEXT_PUBLIC_APP_URL
-          ? { redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback` }
-          : {}),
+        ...(process.env.NEXT_PUBLIC_APP_URL ? {
+          redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback`,
+          webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/plaid/webhook`,
+        } : {}),
       }
       try {
         const response = await plaidClient.linkTokenCreate(params)
@@ -61,9 +62,10 @@ export async function POST(req: NextRequest) {
       optional_products: [Products.Investments],
       country_codes: [CountryCode.Ca, CountryCode.Us],
       language: 'en',
-      ...(process.env.NEXT_PUBLIC_APP_URL
-        ? { redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback` }
-        : {}),
+      ...(process.env.NEXT_PUBLIC_APP_URL ? {
+        redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL}/oauth-callback`,
+        webhook: `${process.env.NEXT_PUBLIC_APP_URL}/api/plaid/webhook`,
+      } : {}),
     }
     try {
       const response = await plaidClient.linkTokenCreate(params)

@@ -52,6 +52,13 @@ export async function syncItem(db: DB, item: Item) {
   } catch (err) {
     console.log(`Holdings sync skipped for item ${item.institutionName}:`, (err as Error).message)
   }
+
+  // 4. Sync investment transactions (optional — skip on error)
+  try {
+    await syncInvestmentTransactions(db, item, accountMap)
+  } catch (err) {
+    console.log(`Investment transactions sync skipped for item ${item.institutionName}:`, (err as Error).message)
+  }
 }
 
 async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
@@ -303,6 +310,65 @@ async function syncHoldings(db: DB, item: Item, accountMap: Map<string, string>)
         .run()
     }
   })
+}
+
+async function syncInvestmentTransactions(db: DB, item: Item, accountMap: Map<string, string>) {
+  const endDate = new Date().toISOString().split('T')[0]
+  const startDate = '2020-01-01'
+  const ts = Math.floor(Date.now() / 1000)
+
+  let offset = 0
+  let total = Infinity
+
+  while (offset < total) {
+    const response = await plaidClient.investmentsTransactionsGet({
+      access_token: item.accessToken,
+      start_date: startDate,
+      end_date: endDate,
+      options: { offset, count: 100 },
+    })
+
+    const { investment_transactions, securities, total_investment_transactions } = response.data
+    total = total_investment_transactions
+    const securityMap = new Map(securities.map((s) => [s.security_id, s]))
+
+    for (const t of investment_transactions) {
+      const accountId = accountMap.get(t.account_id)
+      if (!accountId) continue
+      const security = t.security_id ? securityMap.get(t.security_id) : undefined
+
+      await db.insert(schema.investmentTransactions)
+        .values({
+          id: t.investment_transaction_id,
+          accountId,
+          securityName: security?.name ?? null,
+          tickerSymbol: security?.ticker_symbol ?? null,
+          type: t.type,
+          subtype: t.subtype ?? null,
+          amount: t.amount,
+          quantity: t.quantity ?? null,
+          price: t.price ?? null,
+          fees: t.fees ?? null,
+          date: t.date,
+          isoCurrencyCode: (t as any).iso_currency_code ?? 'CAD',
+          updatedAt: ts,
+        })
+        .onConflictDoUpdate({
+          target: schema.investmentTransactions.id,
+          set: {
+            amount: t.amount,
+            quantity: t.quantity ?? null,
+            price: t.price ?? null,
+            fees: t.fees ?? null,
+            updatedAt: ts,
+          },
+        })
+        .run()
+    }
+
+    offset += investment_transactions.length
+    if (investment_transactions.length === 0) break
+  }
 }
 
 async function writeSnapshot(db: DB) {
