@@ -3,9 +3,11 @@ import { db } from '@/lib/db'
 import {
   getLatestSnapshot,
   getAllSnapshotHistory,
+  getMonthlySpend,
   getCategoryBreakdown,
   getAllHoldings,
   getRecentTransactions,
+  getSetting,
   getAllAccounts,
   getUnlabeledTransfers,
   getCreditCardBalances,
@@ -44,6 +46,8 @@ export default async function OverviewPage() {
   const history = await getAllSnapshotHistory(db)
   const _d = new Date()
   const safeToSpend = await getSafeToSpend(db, _d.getFullYear(), _d.getMonth() + 1)
+  const monthlySpend = await getMonthlySpend(db)
+  const income = Number((await getSetting(db, 'income')) ?? '0')
   const categories = await getCategoryBreakdown(db)
   const holdings = await getAllHoldings(db)
   const transactions = await getRecentTransactions(db, 4)
@@ -52,6 +56,8 @@ export default async function OverviewPage() {
   const unlabeledTransfers = await getUnlabeledTransfers(db)
   const cardBalances = await getCreditCardBalances(db)
   const totalOwed = cardBalances.reduce((s, c) => s + c.balance, 0)
+
+  const savingsRate = income > 0 ? ((income - monthlySpend) / income) * 100 : null
 
   // Allocation donut: by account type
   const investmentsVal = latest?.investmentsValue ?? 0
@@ -70,6 +76,10 @@ export default async function OverviewPage() {
     { label: 'Liabilities', value: liabVal, color: PALETTE[2] },
     { label: 'Other', value: otherVal, color: PALETTE[6] },
   ].filter((s) => s.value > 0)
+
+  // Today's investments delta (last 2 snapshots)
+  const prevSnapshot = history.length >= 2 ? history[history.length - 2] : null
+  const investDelta = prevSnapshot ? investmentsVal - prevSnapshot.investmentsValue : null
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -110,7 +120,35 @@ export default async function OverviewPage() {
       <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
         <NetWorthHeroCard latest={latest} history={history} />
 
-        <SafeToSpendCard data={safeToSpend} />
+        <div className="flex flex-col gap-[18px]">
+          <SafeToSpendCard data={safeToSpend} />
+
+          {/* Investments */}
+          <Card>
+            <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Investments</p>
+            <p className="font-bold text-[24px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
+              {latest ? formatCAD(latest.investmentsValue) : '—'}
+            </p>
+            {investDelta !== null && (
+              <span
+                className={[
+                  'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-2',
+                  investDelta >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
+                ].join(' ')}
+              >
+                {investDelta >= 0 ? '▲' : '▼'} {investDelta >= 0 ? '+' : ''}{formatCAD(investDelta)} today
+              </span>
+            )}
+            {savingsRate !== null && (
+              <div className={[
+                'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-3',
+                savingsRate >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
+              ].join(' ')}>
+                {savingsRate >= 0 ? '▲' : '▼'} {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
 
       {/* Card balances */}
