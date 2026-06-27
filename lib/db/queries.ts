@@ -1351,6 +1351,67 @@ export async function getBillTransactionIds(db: DB, year: number, month: number)
   return billIds
 }
 
+// ─── Safe to Spend ────────────────────────────────────────────────────────────
+
+export type SafeToSpend = {
+  monthlyLimit: number
+  monthlySpend: number
+  paidBills: number
+  discretionarySpent: number
+  billsStillDue: number
+  spendableCash: number
+  creditOwed: number
+  buffer: number
+  cashSafe: number
+  limitSafe: number
+  safeToSpend: number
+  backstopBinding: boolean
+}
+
+export async function getSafeToSpend(db: DB, year: number, month: number): Promise<SafeToSpend> {
+  const monthlyLimit = Number((await getSetting(db, 'allowance')) ?? '3000')
+  const buffer = Number((await getSetting(db, 'safe_to_spend_buffer')) ?? '0')
+  const monthlySpend = await getMonthlySpend(db, year, month)
+
+  const billIds = await getBillTransactionIds(db, year, month)
+  let paidBills = 0
+  if (billIds.size > 0) {
+    const r = await db
+      .select({ total: sql<number>`COALESCE(SUM(${schema.transactions.amount}), 0)` })
+      .from(schema.transactions)
+      .where(inArray(schema.transactions.id, Array.from(billIds)))
+      .get()
+    paidBills = r?.total ?? 0
+  }
+
+  const committedStatus = await getCommittedItemsWithStatus(db, year, month)
+  const recurringStatus = await getRecurringMerchantsWithStatus(db, year, month)
+  const committedDue = committedStatus
+    .filter((i) => i.type === 'expense' && i.confirmedAmount === null)
+    .reduce((s, i) => s + i.expectedAmount, 0)
+  const recurringDue = recurringStatus
+    .filter((r) => r.confirmedAmount === null && !r.likelyCancelled)
+    .reduce((s, r) => s + r.avgAmount, 0)
+  const billsStillDue = committedDue + recurringDue
+
+  const accounts = await getAllAccounts(db)
+  const spendableCash = accounts
+    .filter((a) => a.type === 'depository')
+    .reduce((s, a) => s + (a.balanceAvailable ?? a.balanceCurrent), 0)
+  const creditOwed = (await getCreditCardBalances(db)).reduce((s, c) => s + c.balance, 0)
+
+  const discretionarySpent = monthlySpend - paidBills
+  const limitSafe = monthlyLimit - discretionarySpent
+  const cashSafe = spendableCash - creditOwed - billsStillDue - buffer
+  const safeToSpend = Math.min(limitSafe, cashSafe)
+
+  return {
+    monthlyLimit, monthlySpend, paidBills, discretionarySpent, billsStillDue,
+    spendableCash, creditOwed, buffer, cashSafe, limitSafe, safeToSpend,
+    backstopBinding: cashSafe < limitSafe,
+  }
+}
+
 export async function getInvestmentSummary(db: DB) {
   const rows = await db
     .select()
