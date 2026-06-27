@@ -152,7 +152,9 @@ export default async function BudgetPage({
                 ? `${formatCAD(Math.abs(summary.flexibleRemaining))} over`
                 : formatCAD(summary.flexibleRemaining)}
             </p>
-            <p className="text-[11px] text-[var(--faint)] mt-0.5">free to spend</p>
+            <p className="text-[11px] text-[var(--faint)] mt-0.5">
+              {summary.flexibleRemaining < 0 ? 'flexible budget' : 'free to spend'}
+            </p>
           </Card>
         </div>
       )}
