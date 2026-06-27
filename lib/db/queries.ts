@@ -1284,6 +1284,34 @@ export async function clearLoginAttempts(db: DB, ip: string): Promise<void> {
   await db.delete(schema.loginAttempts).where(eq(schema.loginAttempts.ip, ip)).run()
 }
 
+// ─── Category Labels ──────────────────────────────────────────────────────────
+
+export type CategoryKind = 'fixed' | 'flexible' | 'savings'
+
+export async function getCategoryLabels(db: DB): Promise<Map<string, CategoryKind>> {
+  const rows = await db.select().from(schema.categoryLabels).all()
+  return new Map(rows.map((r) => [r.category, r.kind as CategoryKind]))
+}
+
+export async function setCategoryLabel(db: DB, category: string, kind: CategoryKind): Promise<void> {
+  await db.insert(schema.categoryLabels)
+    .values({ category, kind })
+    .onConflictDoUpdate({ target: schema.categoryLabels.category, set: { kind } })
+    .run()
+}
+
+// Category names that represent income, so they're excluded from spend/budget buckets.
+// used by getBudgetSummary (next task)
+async function getIncomeCategories(db: DB): Promise<Set<string>> {
+  const rows = await db.select({ category: schema.committedItems.category })
+    .from(schema.committedItems)
+    .where(eq(schema.committedItems.type, 'income'))
+    .all()
+  const s = new Set(rows.map((r) => r.category))
+  s.add('INCOME') // built-in Plaid income category
+  return s
+}
+
 // ─── Investment Transactions ──────────────────────────────────────────────────
 
 export async function getInvestmentTransactions(db: DB, limit = 100) {
