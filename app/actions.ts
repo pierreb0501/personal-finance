@@ -25,6 +25,8 @@ import {
   setCommittedItemGroup as dbSetCommittedItemGroup,
   setManualRecurringGroup as dbSetManualRecurringGroup,
   setAutoRecurringGroup as dbSetAutoRecurringGroup,
+  setCategoryLabel,
+  type CategoryKind,
 } from '@/lib/db/queries'
 
 // Built-in categories pass through unchanged; anything else is normalized to
@@ -191,6 +193,13 @@ export async function setMerchantGroup(merchantName: string, groupName: string |
     dbSetAutoRecurringGroup(db, merchantName, groupName)
   }
   revalidatePath('/recurring')
+}
+
+export async function setCategoryKind(category: string, kind: CategoryKind): Promise<void> {
+  await setCategoryLabel(db, category, kind)
+  revalidatePath('/')
+  revalidatePath('/budget')
+  revalidatePath('/spending')
 }
 
 export async function removeAccount(accountId: string): Promise<void> {

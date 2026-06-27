@@ -5,6 +5,8 @@ import { Trash2 } from 'lucide-react'
 import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { saveCategoryBudget, deleteCategoryBudget } from '@/app/actions'
+import type { CategoryKind } from '@/lib/db/queries'
+import { CategoryKindToggle } from '@/components/CategoryKindToggle'
 
 type Props = {
   category: string
@@ -12,9 +14,10 @@ type Props = {
   planned: number | null
   year: number
   month: number
+  kind?: CategoryKind
 }
 
-export function BudgetRow({ category, spent, planned, year, month }: Props) {
+export function BudgetRow({ category, spent, planned, year, month, kind = 'flexible' }: Props) {
   const [currentPlanned, setCurrentPlanned] = useState(planned)
   const [editing, setEditing] = useState(false)
   const [inputVal, setInputVal] = useState(String(planned ?? ''))
@@ -50,6 +53,7 @@ export function BudgetRow({ category, spent, planned, year, month }: Props) {
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-[9px] h-[9px] rounded-[3px] shrink-0" style={{ backgroundColor: color }} />
           <span className="text-[14px] font-semibold text-[var(--ink)] truncate">{label}</span>
+          <CategoryKindToggle category={category} kind={kind} />
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0 text-[14px] tabular-nums">
