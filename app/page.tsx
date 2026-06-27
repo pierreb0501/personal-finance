@@ -12,12 +12,12 @@ import {
   getUnlabeledTransfers,
   getCreditCardBalances,
   getKnownCategories,
-  getSafeToSpend,
+  getBudgetSummary,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
-import { SafeToSpendCard } from '@/components/SafeToSpendCard'
+import { BudgetSummaryCard } from '@/components/BudgetSummaryCard'
 import { DonutChart } from '@/components/DonutChart'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
@@ -45,7 +45,7 @@ export default async function OverviewPage() {
   const latest = await getLatestSnapshot(db)
   const history = await getAllSnapshotHistory(db)
   const _d = new Date()
-  const safeToSpend = await getSafeToSpend(db, _d.getFullYear(), _d.getMonth() + 1)
+  const budget = await getBudgetSummary(db, _d.getFullYear(), _d.getMonth() + 1)
   const monthlySpend = await getMonthlySpend(db)
   const income = Number((await getSetting(db, 'income')) ?? '0')
   const categories = await getCategoryBreakdown(db)
@@ -121,7 +121,7 @@ export default async function OverviewPage() {
         <NetWorthHeroCard latest={latest} history={history} />
 
         <div className="flex flex-col gap-[18px]">
-          <SafeToSpendCard data={safeToSpend} />
+          <BudgetSummaryCard data={budget} />
 
           {/* Investments */}
           <Card>
