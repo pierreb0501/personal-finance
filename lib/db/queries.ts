@@ -1312,6 +1312,50 @@ async function getIncomeCategories(db: DB): Promise<Set<string>> {
   return s
 }
 
+// ─── Budget Summary ───────────────────────────────────────────────────────────
+
+export type BudgetSummary = {
+  totalBudget: number; billsBudget: number; flexibleBudget: number; savingsBudget: number
+  totalSpent: number; flexibleSpent: number; flexibleRemaining: number
+  unbudgetedSpend: number; unbudgetedCount: number
+}
+
+export async function getBudgetSummary(db: DB, year: number, month: number): Promise<BudgetSummary> {
+  const [budgets, breakdown, labels, income] = await Promise.all([
+    getCategoryBudgets(db, year, month),
+    getCategoryBreakdown(db, year, month),
+    getCategoryLabels(db),
+    getIncomeCategories(db),
+  ])
+  const kindOf = (c: string): CategoryKind => labels.get(c) ?? 'flexible'
+
+  const budgetRows = budgets.filter((b) => !income.has(b.category))
+  const spendRows = breakdown.filter((c) => !income.has(c.category) && c.total > 0)
+  const plannedCats = new Set(budgetRows.map((b) => b.category))
+
+  let totalBudget = 0, billsBudget = 0, flexibleBudget = 0, savingsBudget = 0
+  for (const b of budgetRows) {
+    totalBudget += b.planned
+    const k = kindOf(b.category)
+    if (k === 'fixed') billsBudget += b.planned
+    else if (k === 'savings') savingsBudget += b.planned
+    else flexibleBudget += b.planned
+  }
+
+  let totalSpent = 0, flexibleSpent = 0, unbudgetedSpend = 0, unbudgetedCount = 0
+  for (const c of spendRows) {
+    totalSpent += c.total
+    if (kindOf(c.category) === 'flexible') flexibleSpent += c.total
+    if (!plannedCats.has(c.category)) { unbudgetedSpend += c.total; unbudgetedCount += 1 }
+  }
+
+  return {
+    totalBudget, billsBudget, flexibleBudget, savingsBudget,
+    totalSpent, flexibleSpent, flexibleRemaining: flexibleBudget - flexibleSpent,
+    unbudgetedSpend, unbudgetedCount,
+  }
+}
+
 // ─── Investment Transactions ──────────────────────────────────────────────────
 
 export async function getInvestmentTransactions(db: DB, limit = 100) {
