@@ -3,20 +3,19 @@ import { db } from '@/lib/db'
 import {
   getLatestSnapshot,
   getAllSnapshotHistory,
-  getMonthlySpend,
   getCategoryBreakdown,
   getAllHoldings,
   getRecentTransactions,
-  getSetting,
   getAllAccounts,
   getUnlabeledTransfers,
   getCreditCardBalances,
   getKnownCategories,
+  getSafeToSpend,
 } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
-import { ProgressBar } from '@/components/ProgressBar'
+import { SafeToSpendCard } from '@/components/SafeToSpendCard'
 import { DonutChart } from '@/components/DonutChart'
 import { TransactionRow } from '@/components/TransactionRow'
 import { EmptyState } from '@/components/EmptyState'
@@ -43,9 +42,8 @@ function formatDate(): string {
 export default async function OverviewPage() {
   const latest = await getLatestSnapshot(db)
   const history = await getAllSnapshotHistory(db)
-  const monthlySpend = await getMonthlySpend(db)
-  const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
-  const income = Number((await getSetting(db, 'income')) ?? '0')
+  const _d = new Date()
+  const safeToSpend = await getSafeToSpend(db, _d.getFullYear(), _d.getMonth() + 1)
   const categories = await getCategoryBreakdown(db)
   const holdings = await getAllHoldings(db)
   const transactions = await getRecentTransactions(db, 4)
@@ -54,10 +52,6 @@ export default async function OverviewPage() {
   const unlabeledTransfers = await getUnlabeledTransfers(db)
   const cardBalances = await getCreditCardBalances(db)
   const totalOwed = cardBalances.reduce((s, c) => s + c.balance, 0)
-
-  const spendRatio = allowance > 0 ? monthlySpend / allowance : 0
-  const remaining = allowance - monthlySpend
-  const savingsRate = income > 0 ? ((income - monthlySpend) / income) * 100 : null
 
   // Allocation donut: by account type
   const investmentsVal = latest?.investmentsValue ?? 0
@@ -76,10 +70,6 @@ export default async function OverviewPage() {
     { label: 'Liabilities', value: liabVal, color: PALETTE[2] },
     { label: 'Other', value: otherVal, color: PALETTE[6] },
   ].filter((s) => s.value > 0)
-
-  // Today's investments delta (last 2 snapshots)
-  const prevSnapshot = history.length >= 2 ? history[history.length - 2] : null
-  const investDelta = prevSnapshot ? investmentsVal - prevSnapshot.investmentsValue : null
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -120,46 +110,7 @@ export default async function OverviewPage() {
       <div className="grid gap-[18px] mb-[18px]" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
         <NetWorthHeroCard latest={latest} history={history} />
 
-        {/* This Month + Investments */}
-        <Card>
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">This month</p>
-          <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
-            {formatCAD(monthlySpend)}
-          </p>
-          <p className="text-[13px] text-[var(--muted-text)] mt-1">of {formatCAD(allowance)} allowance</p>
-          <ProgressBar value={spendRatio} className="mt-3.5" />
-          <div className="flex justify-between text-[13px] text-[var(--muted-text)] mt-2">
-            <span>{Math.round(spendRatio * 100)}% used</span>
-            <span className={remaining < 0 ? 'text-[var(--negative)] font-semibold' : ''}>
-              {remaining >= 0 ? formatCAD(remaining) : `-${formatCAD(Math.abs(remaining))}`} left
-            </span>
-          </div>
-          {savingsRate !== null && (
-            <div className={[
-              'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-3',
-              savingsRate >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
-            ].join(' ')}>
-              {savingsRate >= 0 ? '▲' : '▼'} {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
-            </div>
-          )}
-
-          <hr className="border-[var(--hairline)] my-4" />
-
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Investments</p>
-          <p className="font-bold text-[24px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
-            {latest ? formatCAD(latest.investmentsValue) : '—'}
-          </p>
-          {investDelta !== null && (
-            <span
-              className={[
-                'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-2',
-                investDelta >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
-              ].join(' ')}
-            >
-              {investDelta >= 0 ? '▲' : '▼'} {investDelta >= 0 ? '+' : ''}{formatCAD(investDelta)} today
-            </span>
-          )}
-        </Card>
+        <SafeToSpendCard data={safeToSpend} />
       </div>
 
       {/* Card balances */}
