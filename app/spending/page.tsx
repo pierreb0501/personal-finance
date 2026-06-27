@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import {
   getMonthlySpend,
   getTransactionsForMonth,
-  getSetting,
+  getSafeToSpend,
   getKnownCategories,
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
@@ -12,6 +12,7 @@ import { formatCAD } from '@/lib/format'
 import { parseMonthParams } from '@/lib/month'
 import { MonthSelector } from '@/components/MonthSelector'
 import { AllowanceEditor } from '@/components/AllowanceEditor'
+import { BufferEditor } from '@/components/BufferEditor'
 import { ProgressBar } from '@/components/ProgressBar'
 import { TransactionList } from '@/components/TransactionList'
 import { TransferAlert } from '@/components/TransferAlert'
@@ -32,7 +33,7 @@ export default async function SpendingPage({
   const now = new Date()
 
   const spend = await getMonthlySpend(db, year, month)
-  const allowance = Number((await getSetting(db, 'allowance')) ?? '3000')
+  const safe = await getSafeToSpend(db, year, month)
   const spendByAccount = await getSpendByAccount(db, year, month)
   const transactions = await getTransactionsForMonth(db, year, month)
   const { rules, knownCustomCategories } = await getKnownCategories(db)
@@ -43,18 +44,20 @@ export default async function SpendingPage({
   const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
   const income = expectedIncome
 
-  const remaining = allowance - spend
-  const spendRatio = allowance > 0 ? spend / allowance : 0
+  // Allowance widget: discretionary basis (aligned with Safe-to-Spend on dashboard)
+  const remaining = safe.monthlyLimit - safe.discretionarySpent
+  const spendRatio = safe.monthlyLimit > 0 ? safe.discretionarySpent / safe.monthlyLimit : 0
   const savings = income > 0 ? income - spend : null
   const savingsRate = income > 0 ? ((income - spend) / income) * 100 : null
 
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const dayOfMonth = now.getDate()
   const daysInMonth = new Date(year, month, 0).getDate()
+  // Project discretionary spend (not raw spend) to month-end, same elapsed-days formula
   const projectedSpend = isCurrentMonth && dayOfMonth > 0
-    ? (spend / dayOfMonth) * daysInMonth
+    ? (safe.discretionarySpent / dayOfMonth) * daysInMonth
     : null
-  const projectedRemaining = projectedSpend !== null ? allowance - projectedSpend : null
+  const projectedRemaining = projectedSpend !== null ? safe.monthlyLimit - projectedSpend : null
   const projectedSavings = projectedSpend !== null && income > 0 ? income - projectedSpend : null
   const projectedSavingsRate = projectedSavings !== null && income > 0
     ? (projectedSavings / income) * 100
@@ -116,8 +119,11 @@ export default async function SpendingPage({
         </Card>
 
         <Card>
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Allowance</p>
-          <AllowanceEditor allowance={allowance} />
+          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Discretionary limit</p>
+          <AllowanceEditor allowance={safe.monthlyLimit} />
+          <div className="mt-4">
+            <BufferEditor buffer={safe.buffer} />
+          </div>
         </Card>
 
         <Card>

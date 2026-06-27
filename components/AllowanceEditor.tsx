@@ -51,7 +51,7 @@ export function AllowanceEditor({ allowance }: { allowance: number }) {
         {formatCAD(current)}
       </p>
       <p className="text-[12px] text-[var(--faint)] mt-0.5 group-hover:text-[var(--accent-soft)] transition-colors">
-        ✎ Tap to edit
+        ✎ Monthly spending limit (discretionary)
       </p>
     </button>
   )
