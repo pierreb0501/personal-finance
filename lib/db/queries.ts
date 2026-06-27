@@ -1295,6 +1295,62 @@ export async function getInvestmentTransactions(db: DB, limit = 100) {
     .all()
 }
 
+// Returns the set of this-month transaction IDs that represent bills (committed
+// expense items + recurring merchants). Each bill claims at most ONE transaction
+// — its best amount match within the bill's category (optionally narrowed by
+// keyword) — and each transaction is claimed at most once. Best-single-match
+// (rather than summing every category match) prevents a discretionary purchase
+// that merely shares a bill's category from being counted as a paid bill, which
+// would inflate "safe to spend". See spec "Risk: bill-match precision".
+export async function getBillTransactionIds(db: DB, year: number, month: number): Promise<Set<string>> {
+  const { start, end } = monthBounds(year, month)
+
+  const txs = await db
+    .select({
+      id: schema.transactions.id,
+      amount: schema.transactions.amount,
+      merchantName: schema.transactions.merchantName,
+      category: schema.transactions.category,
+      customCategory: schema.transactions.customCategory,
+    })
+    .from(schema.transactions)
+    .where(
+      and(
+        gte(schema.transactions.date, start),
+        sql`${schema.transactions.date} <= ${end}`,
+        sql`${schema.transactions.amount} > 0`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      ),
+    )
+    .all()
+
+  const billIds = new Set<string>()
+  const effCat = (t: { category: string; customCategory: string | null }) => t.customCategory ?? t.category
+
+  const claim = (category: string, keyword: string | null, expected: number) => {
+    let pool = txs.filter((t) => !billIds.has(t.id) && effCat(t) === category)
+    if (keyword && pool.length > 0) {
+      const kw = keyword.toLowerCase()
+      const narrowed = pool.filter((t) => t.merchantName?.toLowerCase().includes(kw) ?? false)
+      if (narrowed.length > 0) pool = narrowed
+    }
+    if (pool.length === 0) return
+    const best = pool.sort((a, b) => Math.abs(a.amount - expected) - Math.abs(b.amount - expected))[0]
+    billIds.add(best.id)
+  }
+
+  const committed = (await getCommittedItems(db)).filter(
+    (i) => i.type === 'expense' && isItemDueInMonth(i, year, month),
+  )
+  for (const item of committed) claim(item.category, item.merchantName, item.expectedAmount)
+
+  const recurring = await getRecurringMerchants(db)
+  for (const m of recurring) claim(m.category, m.merchantName, m.avgAmount)
+
+  return billIds
+}
+
 export async function getInvestmentSummary(db: DB) {
   const rows = await db
     .select()
