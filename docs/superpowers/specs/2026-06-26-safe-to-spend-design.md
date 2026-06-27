@@ -1,5 +1,7 @@
 # Safe to spend — design
 
+> **⚠️ SUPERSEDED (2026-06-27)** by `2026-06-27-category-budget-model-design.md`. After visual review the single-allowance + cash-backstop approach was dropped in favour of category budgets as the single source of truth (fixed/flexible labels). Kept for history.
+
 ## Context
 
 The dashboard (`app/page.tsx`) and spending page (`app/spending/page.tsx`) already show a
