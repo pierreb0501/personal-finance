@@ -161,3 +161,8 @@ export const loginAttempts = sqliteTable('login_attempts', {
   count: integer('count').notNull().default(0),
   windowStart: integer('window_start').notNull(),
 })
+
+export const categoryLabels = sqliteTable('category_labels', {
+  category: text('category').primaryKey(), // effective category name (customCategory ?? category)
+  kind: text('kind').notNull(),            // 'fixed' | 'flexible' | 'savings'
+})
