@@ -14,7 +14,7 @@ import {
   getKnownCategories,
   getBudgetSummary,
 } from '@/lib/db/queries'
-import { getCategoryColor, getCategoryLabel, PALETTE } from '@/lib/categories'
+import { PALETTE } from '@/lib/categories'
 import { formatCAD } from '@/lib/format'
 import { NetWorthHeroCard } from '@/components/NetWorthHeroCard'
 import { BudgetSummaryCard } from '@/components/BudgetSummaryCard'

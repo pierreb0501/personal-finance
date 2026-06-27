@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { TriangleAlert, ArrowRight } from 'lucide-react'
 import { db } from '@/lib/db'
-import { getCategoryBreakdown, getCategoryBudgets, getKnownCategories, getUnlabeledTransfers, seedBudgetFromPrevious, getCategoryLabels, getBudgetSummary } from '@/lib/db/queries'
+import { getCategoryBreakdown, getCategoryBudgets, getKnownCategories, getUnlabeledTransfers, seedBudgetFromPrevious, getCategoryLabels, getBudgetSummary, getIncomeCategories } from '@/lib/db/queries'
 import type { CategoryKind } from '@/lib/db/queries'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
 import { CategoryAllocationChart } from '@/components/CategoryAllocationChart'
@@ -31,12 +31,13 @@ export default async function BudgetPage({
     budgets = await getCategoryBudgets(db, year, month)
   }
 
-  const [breakdown, { knownCustomCategories }, unlabeledTransfers, labels, summary] = await Promise.all([
+  const [breakdown, { knownCustomCategories }, unlabeledTransfers, labels, summary, incomeCategories] = await Promise.all([
     getCategoryBreakdown(db, year, month),
     getKnownCategories(db),
     getUnlabeledTransfers(db, year, month),
     getCategoryLabels(db),
     getBudgetSummary(db, year, month),
+    getIncomeCategories(db),
   ])
 
   const kindOf = (c: string): CategoryKind => labels.get(c) ?? 'flexible'
@@ -44,11 +45,13 @@ export default async function BudgetPage({
   const plannedMap = new Map(budgets.map((b) => [b.category, b.planned]))
   const spendMap = new Map(breakdown.map((c) => [c.category, c.total]))
 
-  // All categories that have either a plan or spending this month
+  // All categories that have either a plan or spending this month. Income
+  // categories are excluded so the plan list/subtotals stay consistent with the
+  // income-excluded Total/Spent summary cards (which come from getBudgetSummary).
   const allCategories = [...new Set([
     ...budgets.map((b) => b.category),
     ...breakdown.map((c) => c.category),
-  ])].sort((a, b) => {
+  ])].filter((c) => !incomeCategories.has(c)).sort((a, b) => {
     // Over-plan first, then by spend descending
     const aSpent = spendMap.get(a) ?? 0
     const bSpent = spendMap.get(b) ?? 0
@@ -76,7 +79,7 @@ export default async function BudgetPage({
 
   // Categories not yet planned this month
   const allKnown = [...new Set([...Object.keys(CATEGORY_LABELS), ...knownCustomCategories])]
-  const unplannedCategories = allKnown.filter((c) => !plannedMap.has(c))
+  const unplannedCategories = allKnown.filter((c) => !plannedMap.has(c) && !incomeCategories.has(c))
 
   const sections: { label: string; kind: CategoryKind; categories: string[] }[] = (
     [

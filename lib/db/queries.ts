@@ -1301,8 +1301,8 @@ export async function setCategoryLabel(db: DB, category: string, kind: CategoryK
 }
 
 // Category names that represent income, so they're excluded from spend/budget buckets.
-// used by getBudgetSummary (next task)
-async function getIncomeCategories(db: DB): Promise<Set<string>> {
+// Used by getBudgetSummary and by the budget page (to hide income categories from the plan).
+export async function getIncomeCategories(db: DB): Promise<Set<string>> {
   const rows = await db.select({ category: schema.committedItems.category })
     .from(schema.committedItems)
     .where(eq(schema.committedItems.type, 'income'))
