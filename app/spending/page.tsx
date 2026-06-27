@@ -43,10 +43,14 @@ export default async function SpendingPage({
   const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
   const income = expectedIncome
 
-  // Budget progress (total budget vs total spent)
-  const spendRatio = summary.totalBudget > 0 ? summary.totalSpent / summary.totalBudget : 0
+  // Budget progress (total budget vs total spent). Tell the spending-vs-budget
+  // story with summary.totalSpent everywhere so the card value, % sub-line, and
+  // bar all agree on one spend number (getMonthlySpend differs — it includes
+  // income categories / net-negative categories).
+  const hasBudget = summary.totalBudget > 0
+  const spendRatio = hasBudget ? summary.totalSpent / summary.totalBudget : 0
   const budgetRemaining = summary.totalBudget - summary.totalSpent
-  const spentPct = summary.totalBudget > 0
+  const spentPct = hasBudget
     ? Math.round((summary.totalSpent / summary.totalBudget) * 100)
     : null
 
@@ -56,9 +60,14 @@ export default async function SpendingPage({
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const dayOfMonth = now.getDate()
   const daysInMonth = new Date(year, month, 0).getDate()
-  // Project discretionary spend to month-end using elapsed-days formula
-  const projectedSpend = isCurrentMonth && dayOfMonth > 0
-    ? (summary.totalSpent / dayOfMonth) * daysInMonth
+  // Month-end forecast: bills + savings are lumpy/committed, so hold them at
+  // their budgeted value; only the variable (flexible) spend is projected by
+  // elapsed-days pace. Avoids a day-1 rent payment exploding the projection.
+  const projectedFlexible = isCurrentMonth
+    ? (summary.flexibleSpent / dayOfMonth) * daysInMonth
+    : null
+  const projectedSpend = projectedFlexible !== null
+    ? summary.billsBudget + summary.savingsBudget + projectedFlexible
     : null
   const projectedRemaining = projectedSpend !== null ? summary.totalBudget - projectedSpend : null
   const projectedSavings = projectedSpend !== null && income > 0 ? income - projectedSpend : null
@@ -98,7 +107,7 @@ export default async function SpendingPage({
         <Card padding="sm">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
-            {formatCAD(spend)}
+            {formatCAD(summary.totalSpent)}
           </p>
           <p className="text-[12px] text-[var(--muted-text)] mt-1">
             {spentPct !== null ? `${spentPct}% of budget` : '— of budget'}
@@ -180,7 +189,7 @@ export default async function SpendingPage({
                 </p>
               )}
             </>
-          ) : (
+          ) : hasBudget ? (
             <>
               <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Remaining</p>
               <p
@@ -191,7 +200,18 @@ export default async function SpendingPage({
               >
                 {budgetRemaining >= 0 ? formatCAD(budgetRemaining) : `-${formatCAD(Math.abs(budgetRemaining))}`}
               </p>
-              <p className="text-[12px] text-[var(--faint)] mt-1">no income recorded</p>
+              <p className="text-[12px] text-[var(--muted-text)] mt-1">of your budget</p>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Remaining</p>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--faint)]">—</p>
+              <Link
+                href="/budget"
+                className="text-[12px] text-[var(--faint)] hover:text-[var(--muted-text)] mt-2 inline-block"
+              >
+                Set up budget →
+              </Link>
             </>
           )}
         </Card>
@@ -199,19 +219,34 @@ export default async function SpendingPage({
 
       {/* Budget progress */}
       <Card className="mb-[18px]">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Budget used</p>
-          <span className="font-bold tabular-nums text-[14px] text-[var(--ink)]">
-            {Math.round(spendRatio * 100)}%
-          </span>
-        </div>
-        <ProgressBar value={spendRatio} />
-        {summary.totalBudget > 0 && (
-          <p className={['text-[12px] mt-2', budgetRemaining >= 0 ? 'text-[var(--muted-text)]' : 'text-[var(--negative)]'].join(' ')}>
-            {budgetRemaining >= 0
-              ? `${formatCAD(budgetRemaining)} remaining`
-              : `${formatCAD(Math.abs(budgetRemaining))} over budget`}
-          </p>
+        {hasBudget ? (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Budget used</p>
+              <span className="font-bold tabular-nums text-[14px] text-[var(--ink)]">
+                {Math.round(spendRatio * 100)}%
+              </span>
+            </div>
+            <ProgressBar value={spendRatio} />
+            <p className={['text-[12px] mt-2', budgetRemaining >= 0 ? 'text-[var(--muted-text)]' : 'text-[var(--negative)]'].join(' ')}>
+              {budgetRemaining >= 0
+                ? `${formatCAD(budgetRemaining)} remaining`
+                : `${formatCAD(Math.abs(budgetRemaining))} over budget`}
+            </p>
+          </>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Budget used</p>
+              <p className="text-[13px] text-[var(--muted-text)] mt-1">No budget set for this month</p>
+            </div>
+            <Link
+              href="/budget"
+              className="text-[12px] text-[var(--faint)] hover:text-[var(--muted-text)]"
+            >
+              Set up budget →
+            </Link>
+          </div>
         )}
       </Card>
 
@@ -229,7 +264,7 @@ export default async function SpendingPage({
               </p>
             </div>
             <div className="text-right">
-              {projectedRemaining !== null && (
+              {projectedRemaining !== null && hasBudget && (
                 <div className={[
                   'inline-flex items-center gap-1 text-[12px] font-semibold px-2.5 py-1 rounded-full',
                   projectedRemaining >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
