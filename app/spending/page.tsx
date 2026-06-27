@@ -1,8 +1,9 @@
+import Link from 'next/link'
 import { db } from '@/lib/db'
 import {
   getMonthlySpend,
   getTransactionsForMonth,
-  getSafeToSpend,
+  getBudgetSummary,
   getKnownCategories,
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
@@ -11,8 +12,6 @@ import {
 import { formatCAD } from '@/lib/format'
 import { parseMonthParams } from '@/lib/month'
 import { MonthSelector } from '@/components/MonthSelector'
-import { AllowanceEditor } from '@/components/AllowanceEditor'
-import { BufferEditor } from '@/components/BufferEditor'
 import { ProgressBar } from '@/components/ProgressBar'
 import { TransactionList } from '@/components/TransactionList'
 import { TransferAlert } from '@/components/TransferAlert'
@@ -33,7 +32,7 @@ export default async function SpendingPage({
   const now = new Date()
 
   const spend = await getMonthlySpend(db, year, month)
-  const safe = await getSafeToSpend(db, year, month)
+  const summary = await getBudgetSummary(db, year, month)
   const spendByAccount = await getSpendByAccount(db, year, month)
   const transactions = await getTransactionsForMonth(db, year, month)
   const { rules, knownCustomCategories } = await getKnownCategories(db)
@@ -44,20 +43,24 @@ export default async function SpendingPage({
   const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
   const income = expectedIncome
 
-  // Allowance widget: discretionary basis (aligned with Safe-to-Spend on dashboard)
-  const remaining = safe.monthlyLimit - safe.discretionarySpent
-  const spendRatio = safe.monthlyLimit > 0 ? safe.discretionarySpent / safe.monthlyLimit : 0
+  // Budget progress (total budget vs total spent)
+  const spendRatio = summary.totalBudget > 0 ? summary.totalSpent / summary.totalBudget : 0
+  const budgetRemaining = summary.totalBudget - summary.totalSpent
+  const spentPct = summary.totalBudget > 0
+    ? Math.round((summary.totalSpent / summary.totalBudget) * 100)
+    : null
+
   const savings = income > 0 ? income - spend : null
   const savingsRate = income > 0 ? ((income - spend) / income) * 100 : null
 
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const dayOfMonth = now.getDate()
   const daysInMonth = new Date(year, month, 0).getDate()
-  // Project discretionary spend (not raw spend) to month-end, same elapsed-days formula
+  // Project discretionary spend to month-end using elapsed-days formula
   const projectedSpend = isCurrentMonth && dayOfMonth > 0
-    ? (safe.discretionarySpent / dayOfMonth) * daysInMonth
+    ? (summary.totalSpent / dayOfMonth) * daysInMonth
     : null
-  const projectedRemaining = projectedSpend !== null ? safe.monthlyLimit - projectedSpend : null
+  const projectedRemaining = projectedSpend !== null ? summary.totalBudget - projectedSpend : null
   const projectedSavings = projectedSpend !== null && income > 0 ? income - projectedSpend : null
   const projectedSavingsRate = projectedSavings !== null && income > 0
     ? (projectedSavings / income) * 100
@@ -92,41 +95,74 @@ export default async function SpendingPage({
 
       {/* Stat cards */}
       <div className="grid grid-cols-4 gap-[18px] mb-[18px]">
-        <Card>
+        <Card padding="sm">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
             {formatCAD(spend)}
           </p>
+          <p className="text-[12px] text-[var(--muted-text)] mt-1">
+            {spentPct !== null ? `${spentPct}% of budget` : '— of budget'}
+          </p>
         </Card>
 
-        <Card>
+        <Card padding="sm">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Income</p>
           {income > 0 ? (
             <>
               <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--ink)]">
                 {formatCAD(confirmedIncome > 0 ? confirmedIncome : income)}
               </p>
-              {confirmedIncome > 0 && confirmedIncome < income && (
+              {confirmedIncome > 0 && confirmedIncome < income ? (
                 <p className="text-[12px] text-[var(--muted-text)] mt-1">of {formatCAD(income)} expected</p>
-              )}
-              {confirmedIncome === 0 && (
-                <p className="text-[12px] text-[var(--faint)] mt-1">expected</p>
+              ) : confirmedIncome === 0 ? (
+                <p className="text-[12px] text-[var(--faint)] mt-1">expected · vs {formatCAD(spend)} spent</p>
+              ) : (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1">vs {formatCAD(spend)} spent</p>
               )}
             </>
           ) : (
-            <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--faint)]">—</p>
+            <>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--faint)]">—</p>
+              <p className="text-[12px] text-[var(--faint)] mt-1">no income recorded</p>
+            </>
           )}
         </Card>
 
-        <Card>
-          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-2">Discretionary limit</p>
-          <AllowanceEditor allowance={safe.monthlyLimit} />
-          <div className="mt-4">
-            <BufferEditor buffer={safe.buffer} />
-          </div>
+        <Card padding="sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Total budget</p>
+          {summary.totalBudget > 0 ? (
+            <>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
+                {formatCAD(summary.totalBudget)}
+              </p>
+              <div className="mt-2 space-y-0.5">
+                <p className="text-[12px] text-[var(--muted-text)]">Bills {formatCAD(summary.billsBudget)}</p>
+                <p className="text-[12px] text-[var(--muted-text)]">Flexible {formatCAD(summary.flexibleBudget)}</p>
+                {summary.savingsBudget > 0 && (
+                  <p className="text-[12px] text-[var(--muted-text)]">Savings {formatCAD(summary.savingsBudget)}</p>
+                )}
+              </div>
+              <Link
+                href="/budget"
+                className="text-[11px] text-[var(--faint)] hover:text-[var(--muted-text)] mt-2 inline-block"
+              >
+                Edit budget →
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--faint)]">—</p>
+              <Link
+                href="/budget"
+                className="text-[12px] text-[var(--faint)] hover:text-[var(--muted-text)] mt-2 inline-block"
+              >
+                Set up budget →
+              </Link>
+            </>
+          )}
         </Card>
 
-        <Card>
+        <Card padding="sm">
           {savings !== null ? (
             <>
               <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Saved</p>
@@ -150,11 +186,12 @@ export default async function SpendingPage({
               <p
                 className={[
                   'font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2',
-                  remaining >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
+                  budgetRemaining >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
                 ].join(' ')}
               >
-                {remaining >= 0 ? formatCAD(remaining) : `-${formatCAD(Math.abs(remaining))}`}
+                {budgetRemaining >= 0 ? formatCAD(budgetRemaining) : `-${formatCAD(Math.abs(budgetRemaining))}`}
               </p>
+              <p className="text-[12px] text-[var(--faint)] mt-1">no income recorded</p>
             </>
           )}
         </Card>
@@ -169,6 +206,13 @@ export default async function SpendingPage({
           </span>
         </div>
         <ProgressBar value={spendRatio} />
+        {summary.totalBudget > 0 && (
+          <p className={['text-[12px] mt-2', budgetRemaining >= 0 ? 'text-[var(--muted-text)]' : 'text-[var(--negative)]'].join(' ')}>
+            {budgetRemaining >= 0
+              ? `${formatCAD(budgetRemaining)} remaining`
+              : `${formatCAD(Math.abs(budgetRemaining))} over budget`}
+          </p>
+        )}
       </Card>
 
       {/* Month-end predictor */}
