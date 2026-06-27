@@ -61,19 +61,19 @@ export async function deleteCategoryRule(id: string): Promise<void> {
 }
 
 export async function saveAllowance(amount: number): Promise<void> {
-  upsertSetting(db, 'allowance', String(amount))
+  await upsertSetting(db, 'allowance', String(amount))
   revalidatePath('/')
   revalidatePath('/spending')
 }
 
 export async function setBuffer(amount: number): Promise<void> {
-  upsertSetting(db, 'safe_to_spend_buffer', String(Math.max(0, Math.round(amount))))
+  await upsertSetting(db, 'safe_to_spend_buffer', String(Math.max(0, Math.round(amount))))
   revalidatePath('/')
   revalidatePath('/spending')
 }
 
 export async function saveIncome(amount: number): Promise<void> {
-  upsertSetting(db, 'income', String(amount))
+  await upsertSetting(db, 'income', String(amount))
   revalidatePath('/')
   revalidatePath('/spending')
 }
