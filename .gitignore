@@ -48,6 +48,8 @@ finance.db-wal
 finance-dev.db
 finance-dev.db-shm
 finance-dev.db-wal
+# Manual backups taken before data migrations
+*.db.bak-*
 
 # Environment
 .env.local

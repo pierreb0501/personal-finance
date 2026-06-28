@@ -113,6 +113,20 @@
       "when": 1782588686272,
       "tag": "0015_colossal_rictor",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1782588686273,
+      "tag": "0016_committed_auto_average",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1782588686274,
+      "tag": "0017_manual_recurring_auto_average",
+      "breakpoints": true
     }
   ]
 }

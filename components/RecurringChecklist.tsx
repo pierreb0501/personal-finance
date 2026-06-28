@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import { formatCAD } from '@/lib/format'
 import { getCategoryColor, getCategoryLabel, CATEGORY_LABELS } from '@/lib/categories'
-import { Check, Minus, X, Plus, Repeat2, FolderOpen, Folder, ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, Minus, X, Plus, Pencil, Repeat2, FolderOpen, Folder, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   addCommittedIncomeItem,
   addCommittedExpenseItem,
+  updateCommittedItem,
   deleteCommittedItem,
   addRecurring,
   removeManualRecurring,
@@ -114,6 +115,116 @@ function DeleteCommittedBtn({ id }: { id: string }) {
       className="p-1 rounded-[6px] text-[var(--faint)] hover:text-[var(--negative)] hover:bg-[#f6e8e4] transition-colors cursor-pointer">
       <X size={13} />
     </button>
+  )
+}
+
+function AutoAverageToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="col-span-2 flex items-start gap-2 text-[12px] text-[var(--ink)] cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 cursor-pointer" />
+      <span>
+        Auto-average — show the trailing 12-month average instead of a fixed amount.
+        <span className="block text-[11px] text-[var(--faint)]">Best for bills that drift (telecom, utilities). The amount above is used as a fallback until there's history.</span>
+      </span>
+    </label>
+  )
+}
+
+function EditBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} title="Edit"
+      className="p-1 rounded-[6px] text-[var(--faint)] hover:text-[var(--ink)] hover:bg-[var(--hairline)] transition-colors cursor-pointer">
+      <Pencil size={12} />
+    </button>
+  )
+}
+
+// Shared edit form for committed income/expense items — pre-filled from the item
+// and persisted via updateCommittedItem. Mirrors the Add forms field-for-field.
+function EditCommittedForm({ item, knownCustomCategories, onDone }: {
+  item: CommittedItemWithStatus
+  knownCustomCategories: string[]
+  onDone: () => void
+}) {
+  const [name, setName] = useState(item.name)
+  const [amount, setAmount] = useState(item.fixedAmount ? String(item.fixedAmount) : '')
+  const [day, setDay] = useState(item.expectedDay ? String(item.expectedDay) : '')
+  const [merchant, setMerchant] = useState(item.merchantName ?? '')
+  const [category, setCategory] = useState(item.category)
+  const [intervalMonths, setIntervalMonths] = useState(item.intervalMonths)
+  const [anchorMonth, setAnchorMonth] = useState<number>(item.anchorMonth ?? new Date().getMonth() + 1)
+  const [anchorYear, setAnchorYear] = useState<number>(item.anchorYear ?? new Date().getFullYear())
+  const [autoAverage, setAutoAverage] = useState(item.autoAverage)
+  const [pending, setPending] = useState(false)
+  const cats = allCategories(knownCustomCategories)
+  const isIncome = item.type === 'income'
+
+  async function handle() {
+    if (!name.trim()) return
+    const amt = amount ? parseFloat(amount) : 0
+    if (isNaN(amt) || amt < 0) return
+    if (!autoAverage && amt <= 0) return
+    const dayNum = day ? Math.min(31, Math.max(1, Number(day))) : undefined
+    const isMulti = intervalMonths > 1
+    setPending(true)
+    await updateCommittedItem(
+      item.id, name.trim(), amt, category, dayNum, merchant.trim() || undefined,
+      isMulti ? intervalMonths : undefined,
+      isMulti ? anchorYear : undefined,
+      isMulti ? anchorMonth : undefined,
+      autoAverage,
+    )
+    setPending(false)
+    onDone()
+  }
+
+  return (
+    <div className="py-3 border-b border-[var(--hairline)] last:border-0">
+      <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-3">
+        Edit {isIncome ? 'income source' : 'committed charge'}
+      </p>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          placeholder={autoAverage ? 'Fallback amount (optional)' : 'Expected amount (CAD)'}
+          min={0} step={0.01}
+          className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <input type="number" value={day} onChange={(e) => setDay(e.target.value)} placeholder="Day of month (optional)"
+          min={1} max={31}
+          className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <input type="text" value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Keyword to match transactions"
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <AutoAverageToggle checked={autoAverage} onChange={setAutoAverage} />
+        <select value={category} onChange={(e) => setCategory(e.target.value)}
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+          {cats.map((c) => <option key={c} value={c}>{getCategoryLabel(c)}</option>)}
+        </select>
+        <select value={intervalMonths} onChange={(e) => setIntervalMonths(Number(e.target.value))}
+          className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+          {INTERVAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {intervalMonths > 1 && (
+          <div className="col-span-2 flex gap-2">
+            <select value={anchorMonth} onChange={(e) => setAnchorMonth(Number(e.target.value))}
+              className="flex-1 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
+              {MONTH_NAMES_FULL.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+            <input type="number" value={anchorYear} onChange={(e) => setAnchorYear(Number(e.target.value))}
+              min={2020} max={2100} placeholder="Year"
+              className="w-24 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none" />
+            <p className="self-center text-[11px] text-[var(--faint)] shrink-0">= first due month</p>
+          </div>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={handle} disabled={pending || !name.trim() || (!autoAverage && !amount)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[var(--ink)] text-white rounded-[8px] hover:opacity-80 disabled:opacity-40 cursor-pointer">
+          <Check size={12} />{pending ? 'Saving…' : 'Save'}
+        </button>
+        <button onClick={onDone} className="px-3 py-1.5 text-[12px] font-medium text-[var(--muted-text)] hover:text-[var(--ink)] cursor-pointer">Cancel</button>
+      </div>
+    </div>
   )
 }
 
@@ -246,13 +357,15 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
   const [intervalMonths, setIntervalMonths] = useState(1)
   const [anchorMonth, setAnchorMonth] = useState<number>(new Date().getMonth() + 1)
   const [anchorYear, setAnchorYear] = useState<number>(new Date().getFullYear())
+  const [autoAverage, setAutoAverage] = useState(false)
   const [pending, setPending] = useState(false)
   const cats = allCategories(knownCustomCategories)
 
   async function handle() {
-    if (!name.trim() || !amount) return
-    const amt = parseFloat(amount)
-    if (isNaN(amt) || amt <= 0) return
+    if (!name.trim()) return
+    const amt = amount ? parseFloat(amount) : 0
+    if (isNaN(amt) || amt < 0) return
+    if (!autoAverage && amt <= 0) return
     const dayNum = day ? Math.min(31, Math.max(1, Number(day))) : undefined
     const isMulti = intervalMonths > 1
     setPending(true)
@@ -261,6 +374,7 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
       isMulti ? intervalMonths : undefined,
       isMulti ? anchorYear : undefined,
       isMulti ? anchorMonth : undefined,
+      autoAverage,
     )
     setPending(false)
     onDone()
@@ -272,7 +386,8 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
       <div className="grid grid-cols-2 gap-2 mb-2">
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Salary)"
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
-        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Monthly expected (CAD)"
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          placeholder={autoAverage ? 'Fallback amount (optional)' : 'Monthly expected (CAD)'}
           min={0} step={0.01}
           className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
         <input type="number" value={day} onChange={(e) => setDay(e.target.value)} placeholder="Day of month (optional)"
@@ -283,6 +398,7 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
         <p className="col-span-2 text-[11px] text-[var(--faint)]">
           Keyword matches all transactions from that source — bi-weekly payments are summed automatically.
         </p>
+        <AutoAverageToggle checked={autoAverage} onChange={setAutoAverage} />
         <select value={category} onChange={(e) => setCategory(e.target.value)}
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
           {cats.map((c) => <option key={c} value={c}>{getCategoryLabel(c)}</option>)}
@@ -305,7 +421,7 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
         )}
       </div>
       <div className="flex gap-2">
-        <button onClick={handle} disabled={pending || !name.trim() || !amount}
+        <button onClick={handle} disabled={pending || !name.trim() || (!autoAverage && !amount)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[var(--ink)] text-white rounded-[8px] hover:opacity-80 disabled:opacity-40 cursor-pointer">
           <Check size={12} />{pending ? 'Saving…' : 'Add'}
         </button>
@@ -315,11 +431,16 @@ function AddIncomeForm({ knownCustomCategories, onDone }: { knownCustomCategorie
   )
 }
 
-function IncomeRow({ item, knownGroups }: { item: CommittedItemWithStatus; knownGroups: string[] }) {
+function IncomeRow({ item, knownGroups, knownCustomCategories }: { item: CommittedItemWithStatus; knownGroups: string[]; knownCustomCategories: string[] }) {
+  const [editing, setEditing] = useState(false)
   const state = confirmState(item.confirmedAmount, item.expectedAmount)
 
   async function handleGroup(g: string | null) {
     await setItemGroup(item.id, g)
+  }
+
+  if (editing) {
+    return <EditCommittedForm item={item} knownCustomCategories={knownCustomCategories} onDone={() => setEditing(false)} />
   }
 
   return (
@@ -350,12 +471,15 @@ function IncomeRow({ item, knownGroups }: { item: CommittedItemWithStatus; known
             {item.merchantName && (
               <span className="text-[11px] text-[var(--faint)]">· matches "{item.merchantName}"</span>
             )}
+            {item.autoAverage && (
+              <span className="text-[11px] text-[var(--faint)]">· 12-mo avg</span>
+            )}
           </div>
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0 ml-4">
         <div className="text-right">
-          <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">{formatCAD(item.expectedAmount)}</p>
+          <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">{item.autoAverage ? '~' : ''}{formatCAD(item.expectedAmount)}</p>
           {state === 'full' && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--positive)] bg-[#e8f4ed] px-1.5 py-0.5 rounded-full">
               <Check size={9} />{formatCAD(item.confirmedAmount!)}
@@ -372,6 +496,7 @@ function IncomeRow({ item, knownGroups }: { item: CommittedItemWithStatus; known
             <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full">Pending</span>
           )}
         </div>
+        <EditBtn onClick={() => setEditing(true)} />
         <GroupPicker currentGroup={item.groupName} knownGroups={knownGroups} onAssign={handleGroup} />
         <DeleteCommittedBtn id={item.id} />
       </div>
@@ -440,13 +565,13 @@ function IncomeSection({ items, knownCustomCategories }: { items: CommittedItemW
             const gc = groupItems.filter((i) => confirmState(i.confirmedAmount, i.expectedAmount) !== 'pending').length
             return (
               <GroupSection key={groupName} name={groupName} itemCount={groupItems.length} confirmedCount={gc}>
-                {groupItems.map((item) => <IncomeRow key={item.id} item={item} knownGroups={knownGroups} />)}
+                {groupItems.map((item) => <IncomeRow key={item.id} item={item} knownGroups={knownGroups} knownCustomCategories={knownCustomCategories} />)}
               </GroupSection>
             )
           })}
           {ungrouped.length > 0 && (
             <div className={grouped.size > 0 ? 'mt-1' : ''}>
-              {ungrouped.map((item) => <IncomeRow key={item.id} item={item} knownGroups={knownGroups} />)}
+              {ungrouped.map((item) => <IncomeRow key={item.id} item={item} knownGroups={knownGroups} knownCustomCategories={knownCustomCategories} />)}
             </div>
           )}
         </div>
@@ -518,13 +643,15 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
   const [intervalMonths, setIntervalMonths] = useState(1)
   const [anchorMonth, setAnchorMonth] = useState<number>(new Date().getMonth() + 1)
   const [anchorYear, setAnchorYear] = useState<number>(new Date().getFullYear())
+  const [autoAverage, setAutoAverage] = useState(false)
   const [pending, setPending] = useState(false)
   const cats = allCategories(knownCustomCategories)
 
   async function handle() {
-    if (!name.trim() || !amount) return
-    const amt = parseFloat(amount)
-    if (isNaN(amt) || amt <= 0) return
+    if (!name.trim()) return
+    const amt = amount ? parseFloat(amount) : 0
+    if (isNaN(amt) || amt < 0) return
+    if (!autoAverage && amt <= 0) return
     const dayNum = day ? Math.min(31, Math.max(1, Number(day))) : undefined
     const isMulti = intervalMonths > 1
     setPending(true)
@@ -533,6 +660,7 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
       isMulti ? intervalMonths : undefined,
       isMulti ? anchorYear : undefined,
       isMulti ? anchorMonth : undefined,
+      autoAverage,
     )
     setPending(false)
     onDone()
@@ -544,7 +672,8 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
       <div className="grid grid-cols-2 gap-2 mb-2">
         <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Rent)"
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
-        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Expected amount (CAD)"
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          placeholder={autoAverage ? 'Fallback amount (optional)' : 'Expected amount (CAD)'}
           min={0} step={0.01}
           className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
         <input type="number" value={day} onChange={(e) => setDay(e.target.value)} placeholder="Day of month (optional)"
@@ -552,6 +681,7 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
           className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
         <input type="text" value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Keyword to match transactions"
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <AutoAverageToggle checked={autoAverage} onChange={setAutoAverage} />
         <select value={category} onChange={(e) => setCategory(e.target.value)}
           className="col-span-2 px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] focus:outline-none">
           {cats.map((c) => <option key={c} value={c}>{getCategoryLabel(c)}</option>)}
@@ -574,7 +704,7 @@ function AddExpenseForm({ knownCustomCategories, onDone }: { knownCustomCategori
         )}
       </div>
       <div className="flex gap-2">
-        <button onClick={handle} disabled={pending || !name.trim() || !amount}
+        <button onClick={handle} disabled={pending || !name.trim() || (!autoAverage && !amount)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[var(--ink)] text-white rounded-[8px] hover:opacity-80 disabled:opacity-40 cursor-pointer">
           <Check size={12} />{pending ? 'Saving…' : 'Add'}
         </button>
@@ -631,6 +761,54 @@ function AddAutoChargeForm({ knownCustomCategories, onDone }: { knownCustomCateg
   )
 }
 
+// Edit a recurring merchant charge with the same fixed-vs-auto model as income.
+// Saving upserts a manual entry keyed on merchant name (auto-detection then yields
+// to it; see getRecurringMerchants). Auto-average on -> amount tracks the trailing
+// 12-month average; off -> the typed amount is fixed. Category stays editable via
+// the inline CategoryPicker on the row.
+function EditChargeForm({ m, onDone }: { m: RecurringMerchantWithStatus; onDone: () => void }) {
+  // Auto-detected charges currently behave like an average, so default the toggle
+  // on for them; manual charges reflect their stored flag.
+  const [autoAverage, setAutoAverage] = useState(m.isManual ? m.autoAverage : true)
+  const [amount, setAmount] = useState(m.fixedAmount ? String(m.fixedAmount) : '')
+  const [day, setDay] = useState(String(m.dayOfMonth))
+  const [pending, setPending] = useState(false)
+
+  async function handle() {
+    const dayNum = Math.min(31, Math.max(1, Number(day)))
+    if (isNaN(dayNum) || !day) return
+    const amt = amount ? parseFloat(amount) : 0
+    if (isNaN(amt) || amt < 0) return
+    if (!autoAverage && amt <= 0) return
+    setPending(true)
+    await addRecurring(m.merchantName, dayNum, amt, m.category, autoAverage)
+    setPending(false)
+    onDone()
+  }
+
+  return (
+    <div className="py-3 border-b border-[var(--hairline)] last:border-0">
+      <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)] mb-3">Edit &ldquo;{m.merchantName}&rdquo;</p>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          placeholder={autoAverage ? 'Fallback amount (optional)' : 'Fixed amount (CAD)'}
+          min={0} step={0.01}
+          className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <input type="number" value={day} onChange={(e) => setDay(e.target.value)} placeholder="Day of month (1–31)" min={1} max={31}
+          className="px-3 py-2 text-[13px] bg-[var(--bg)] border border-[var(--hairline)] rounded-[10px] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none" />
+        <AutoAverageToggle checked={autoAverage} onChange={setAutoAverage} />
+      </div>
+      <div className="flex gap-2">
+        <button onClick={handle} disabled={pending || !day || (!autoAverage && !amount)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[var(--ink)] text-white rounded-[8px] hover:opacity-80 disabled:opacity-40 cursor-pointer">
+          <Check size={12} />{pending ? 'Saving…' : 'Save'}
+        </button>
+        <button onClick={onDone} className="px-3 py-1.5 text-[12px] font-medium text-[var(--muted-text)] hover:text-[var(--ink)] cursor-pointer">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 type ChargeItem =
   | { kind: 'committed'; data: CommittedItemWithStatus }
   | { kind: 'auto'; data: RecurringMerchantWithStatus }
@@ -640,9 +818,14 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
   knownGroups: string[]
   knownCustomCategories: string[]
 }) {
+  const [editing, setEditing] = useState(false)
+
   if (item.kind === 'committed') {
     const d = item.data
     const state = confirmState(d.confirmedAmount, d.expectedAmount)
+    if (editing) {
+      return <EditCommittedForm item={d} knownCustomCategories={knownCustomCategories} onDone={() => setEditing(false)} />
+    }
     return (
       <div className="flex items-center justify-between py-3 border-b border-[var(--hairline)] last:border-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -665,12 +848,13 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
                 </span>
               )}
               {d.merchantName && <span className="text-[11px] text-[var(--faint)]">· matches "{d.merchantName}"</span>}
+              {d.autoAverage && <span className="text-[11px] text-[var(--faint)]">· 12-mo avg</span>}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 ml-4">
           <div className="text-right">
-            <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">{formatCAD(d.expectedAmount)}</p>
+            <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">{d.autoAverage ? '~' : ''}{formatCAD(d.expectedAmount)}</p>
             {state === 'full' && (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--negative)] bg-[#f6e8e4] px-1.5 py-0.5 rounded-full">
                 <Check size={9} />{formatCAD(d.confirmedAmount!)}
@@ -685,6 +869,7 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full">Pending</span>
             )}
           </div>
+          <EditBtn onClick={() => setEditing(true)} />
           <GroupPicker currentGroup={d.groupName} knownGroups={knownGroups} onAssign={(g) => setItemGroup(d.id, g)} />
           <DeleteCommittedBtn id={d.id} />
         </div>
@@ -694,6 +879,9 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
 
   const m = item.data
   const state: ConfirmState = m.confirmedAmount !== null ? 'full' : 'pending'
+  if (editing) {
+    return <EditChargeForm m={m} onDone={() => setEditing(false)} />
+  }
   return (
     <div className="flex items-center justify-between py-3 border-b border-[var(--hairline)] last:border-0">
       <div className="flex items-center gap-3 min-w-0">
@@ -701,7 +889,7 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-[14px] font-medium text-[var(--ink)] truncate">{m.merchantName}</p>
-            {m.isManual && (
+            {m.isManual && !m.autoAverage && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full shrink-0">Manual</span>
             )}
             {m.confirmedAccountLabel && state !== 'pending' && <AccountLabel label={m.confirmedAccountLabel} />}
@@ -709,12 +897,13 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <CategoryPicker merchantName={m.merchantName} category={m.category} isManual={m.isManual} knownCustomCategories={knownCustomCategories} />
             <span className="text-[11px] text-[var(--faint)]">· ~{ordinal(m.dayOfMonth)} of each month</span>
+            {m.autoAverage && <span className="text-[11px] text-[var(--faint)]">· 12-mo avg</span>}
           </div>
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0 ml-4">
         <div className="text-right">
-          <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">~{formatCAD(m.avgAmount)}</p>
+          <p className="text-[14px] font-semibold tabular-nums text-[var(--ink)]">{(!m.isManual || m.autoAverage) ? '~' : ''}{formatCAD(m.avgAmount)}</p>
           {m.confirmedAmount !== null ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--negative)] bg-[#f6e8e4] px-1.5 py-0.5 rounded-full">
               <Repeat2 size={9} />{formatCAD(m.confirmedAmount)}
@@ -731,6 +920,7 @@ function ChargeRow({ item, knownGroups, knownCustomCategories }: {
             <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full">Pending</span>
           )}
         </div>
+        <EditBtn onClick={() => setEditing(true)} />
         <GroupPicker
           currentGroup={m.groupName}
           knownGroups={knownGroups}

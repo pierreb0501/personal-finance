@@ -690,6 +690,7 @@ export async function getRecurringMerchants(db: DB) {
     dayOfMonth: number
     isManual: boolean
     groupName: string | null
+    autoAverage: boolean
   }[] = []
 
   for (const [merchantName, data] of merchantMap.entries()) {
@@ -731,7 +732,7 @@ export async function getRecurringMerchants(db: DB) {
 
     const avgAmount = matchingAmounts.reduce((s, a) => s + a, 0) / matchingAmounts.length
 
-    result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false, groupName: null })
+    result.push({ merchantName, category: data.category, avgAmount, monthCount: bestCount, dayOfMonth: bestDay, isManual: false, groupName: null, autoAverage: false })
   }
 
   // Merge manual entries (never dismissed)
@@ -744,6 +745,7 @@ export async function getRecurringMerchants(db: DB) {
       dayOfMonth: m.dayOfMonth,
       isManual: true,
       groupName: m.groupName ?? null,
+      autoAverage: !!m.autoAverage,
     })
   }
 
@@ -754,14 +756,15 @@ export async function dismissRecurringMerchant(db: DB, merchantName: string): Pr
   await db.insert(schema.dismissedRecurring).values({ merchantName }).onConflictDoNothing().run()
 }
 
-export async function addManualRecurring(db: DB, merchantName: string, dayOfMonth: number, avgAmount: number, category: string): Promise<void> {
+export async function addManualRecurring(db: DB, merchantName: string, dayOfMonth: number, avgAmount: number, category: string, autoAverage?: boolean): Promise<void> {
   const id = `manual_rec_${Date.now()}`
+  const auto = autoAverage ? 1 : 0
   await db
     .insert(schema.manualRecurring)
-    .values({ id, merchantName, dayOfMonth, avgAmount, category, createdAt: Math.floor(Date.now() / 1000) })
+    .values({ id, merchantName, dayOfMonth, avgAmount, category, createdAt: Math.floor(Date.now() / 1000), autoAverage: auto })
     .onConflictDoUpdate({
       target: schema.manualRecurring.merchantName,
-      set: { dayOfMonth, avgAmount, category },
+      set: { dayOfMonth, avgAmount, category, autoAverage: auto },
     })
     .run()
 }
@@ -853,10 +856,13 @@ export async function getCustomCategories(db: DB) {
 export async function getKnownCategories(db: DB): Promise<{ rules: CategoryRule[]; knownCustomCategories: string[] }> {
   const rules = await getMerchantRules(db)
   const customCats = await getCustomCategories(db)
+  // Slugify before deduping so legacy raw-name categories ("Rent") and their
+  // canonical slug ("RENT") collapse to one entry — otherwise both surface as
+  // twin "Rent" options in the pickers (they render to the same label).
   const knownCustomCategories = [...new Set([
-    ...rules.map((r) => r.category),
-    ...customCats.map((c) => c.name),
-  ])]
+    ...rules.map((r) => slugifyCategory(r.category)),
+    ...customCats.map((c) => slugifyCategory(c.name)),
+  ].filter(Boolean))]
   return { rules, knownCustomCategories }
 }
 
@@ -934,6 +940,7 @@ export async function addCommittedItem(
   intervalMonths?: number,
   anchorYear?: number,
   anchorMonth?: number,
+  autoAverage?: boolean,
 ): Promise<void> {
   await db.insert(schema.committedItems)
     .values({
@@ -948,7 +955,29 @@ export async function addCommittedItem(
       intervalMonths: intervalMonths ?? 1,
       anchorYear: anchorYear ?? null,
       anchorMonth: anchorMonth ?? null,
+      autoAverage: autoAverage ? 1 : 0,
     })
+    .run()
+}
+
+export async function updateCommittedItem(
+  db: DB,
+  id: string,
+  fields: {
+    name: string
+    expectedAmount: number
+    category: string
+    expectedDay: number | null
+    merchantName: string | null
+    intervalMonths: number
+    anchorYear: number | null
+    anchorMonth: number | null
+    autoAverage: number
+  },
+): Promise<void> {
+  await db.update(schema.committedItems)
+    .set(fields)
+    .where(eq(schema.committedItems.id, id))
     .run()
 }
 
@@ -962,7 +991,15 @@ export type CommittedItemWithStatus = {
   id: string
   name: string
   type: 'income' | 'expense'
+  // For auto-average items this is the trailing-12-month average (falling back to
+  // the stored fixed amount when there's no history yet); otherwise the fixed
+  // amount the user entered.
   expectedAmount: number
+  // The raw stored amount the user entered — the fixed value, or the fallback for
+  // auto-average items. Surfaced so the edit form seeds from the stored value
+  // rather than the computed average.
+  fixedAmount: number
+  autoAverage: boolean
   expectedDay: number | null
   merchantName: string | null
   category: string
@@ -975,26 +1012,25 @@ export type CommittedItemWithStatus = {
   confirmedAccountLabel: string | null
 }
 
-function isItemDueInMonth(
-  item: { intervalMonths: number; anchorYear: number | null; anchorMonth: number | null },
-  year: number,
-  month: number,
-): boolean {
-  if (item.intervalMonths <= 1) return true
-  if (item.anchorYear === null || item.anchorMonth === null) return true
-  const diff = (year * 12 + month) - (item.anchorYear * 12 + item.anchorMonth)
-  return diff >= 0 && diff % item.intervalMonths === 0
+type CommittedCandidateTx = {
+  id: string
+  amount: number
+  date: string
+  merchantName: string | null
+  category: string
+  categoryDetailed: string | null
+  customCategory: string | null
+  accountName: string | null
+  accountType: string | null
+  institutionName: string | null
 }
 
-export async function getCommittedItemsWithStatus(db: DB, year: number, month: number): Promise<CommittedItemWithStatus[]> {
-  const { start, end } = monthBounds(year, month)
-  const allItems = await getCommittedItems(db)
-  const items = allItems.filter((item) => isItemDueInMonth(item, year, month))
-
-  const allTxs = await db
+async function selectCommittedCandidateTxs(db: DB, start: string, end: string): Promise<CommittedCandidateTx[]> {
+  const rows = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
+      date: schema.transactions.date,
       merchantName: schema.transactions.merchantName,
       category: schema.transactions.category,
       categoryDetailed: schema.transactions.categoryDetailed,
@@ -1015,62 +1051,96 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
       )
     )
     .all()
-
   // Credit-card payment legs are transfers — never confirmed income or expense.
-  const txs = allTxs.filter((tx) => !isCardPayment(tx))
+  return rows.filter((tx) => !isCardPayment(tx))
+}
+
+// Shared category-then-keyword matcher: match by category label first (the primary
+// signal — users tag recurring transactions with labels like "Rent" or "Income"),
+// then narrow by keyword when set (disambiguates items sharing a category, e.g. two
+// income sources both labeled "Income"); fall back to all category matches if the
+// keyword filters to zero.
+function matchCommittedTxs<T extends { amount: number; merchantName: string | null; category: string; customCategory: string | null }>(
+  item: { type: string; category: string; merchantName: string | null },
+  txs: T[],
+): T[] {
+  const isIncome = item.type === 'income'
+  const isInDirection = (tx: { amount: number }) => isIncome ? tx.amount < 0 : tx.amount > 0
+  const effCategory = (tx: { category: string; customCategory: string | null }) => tx.customCategory ?? tx.category
+
+  const categoryMatched = txs.filter((tx) => isInDirection(tx) && effCategory(tx) === item.category)
+  if (!item.merchantName || categoryMatched.length === 0) return categoryMatched
+
+  const kw = item.merchantName.toLowerCase()
+  const keywordFiltered = categoryMatched.filter((tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false)
+  return keywordFiltered.length > 0 ? keywordFiltered : categoryMatched
+}
+
+// Average of per-month totals over the matched history. Months with no matching
+// transaction are excluded, so a gap (or a quarterly cadence) doesn't deflate the
+// figure — this yields the typical amount per occurrence-month. Null when there's
+// no history to average.
+function trailingMonthlyAverage(
+  item: { type: string; category: string; merchantName: string | null },
+  histTxs: CommittedCandidateTx[],
+): number | null {
+  const matched = matchCommittedTxs(item, histTxs)
+  if (matched.length === 0) return null
+  const byMonth = new Map<string, number>()
+  for (const tx of matched) {
+    const key = tx.date.slice(0, 7)
+    byMonth.set(key, (byMonth.get(key) ?? 0) + Math.abs(tx.amount))
+  }
+  const sums = [...byMonth.values()]
+  return sums.reduce((s, a) => s + a, 0) / sums.length
+}
+
+function isItemDueInMonth(
+  item: { intervalMonths: number; anchorYear: number | null; anchorMonth: number | null },
+  year: number,
+  month: number,
+): boolean {
+  if (item.intervalMonths <= 1) return true
+  if (item.anchorYear === null || item.anchorMonth === null) return true
+  const diff = (year * 12 + month) - (item.anchorYear * 12 + item.anchorMonth)
+  return diff >= 0 && diff % item.intervalMonths === 0
+}
+
+export async function getCommittedItemsWithStatus(db: DB, year: number, month: number): Promise<CommittedItemWithStatus[]> {
+  const { start, end } = monthBounds(year, month)
+  const allItems = await getCommittedItems(db)
+  const items = allItems.filter((item) => isItemDueInMonth(item, year, month))
+
+  const txs = await selectCommittedCandidateTxs(db, start, end)
+
+  // Trailing-12-month history is only needed for auto-average items, so fetch it
+  // lazily. Window: 12 months ending with (and including) the viewed month. A
+  // charge that has already posted this month is counted; a month with no posted
+  // match contributes nothing, so an as-yet-unbilled current month doesn't drag
+  // the average down.
+  let histTxs: CommittedCandidateTx[] = []
+  if (items.some((item) => item.autoAverage)) {
+    const histStart = localDateString(new Date(year, month - 1 - 11, 1))
+    histTxs = await selectCommittedCandidateTxs(db, histStart, end)
+  }
 
   return items.map((item) => {
-    const isIncome = item.type === 'income'
-    const isInDirection = (tx: { amount: number }) => isIncome ? tx.amount < 0 : tx.amount > 0
-    const txEffectiveCategory = (tx: { category: string; customCategory: string | null }) =>
-      tx.customCategory ?? tx.category
+    const matched = matchCommittedTxs(item, txs)
 
-    // Step 1: match by category label (the primary signal — the user tags recurring
-    // transactions with dedicated labels like "Rent", "Income", "Tax Return").
-    const categoryMatched = txs.filter((tx) => {
-      if (!isInDirection(tx)) return false
-      return txEffectiveCategory(tx) === item.category
-    })
+    // Displayed expected amount: trailing-12-month average for auto-average items
+    // (falling back to the stored fixed amount when there's no history yet),
+    // otherwise the fixed amount the user entered.
+    const autoAverage = !!item.autoAverage
+    const averaged = autoAverage ? trailingMonthlyAverage(item, histTxs) : null
+    const expectedAmount = averaged ?? item.expectedAmount
 
-    // Step 2: if a keyword is set, use it to narrow the category matches (handles
-    // multiple items sharing the same category, e.g. two income sources both labeled
-    // "Income"). Fall back to all category matches if keyword filters to zero.
-    let matched = categoryMatched
-    if (item.merchantName && categoryMatched.length > 0) {
-      const kw = item.merchantName.toLowerCase()
-      const keywordFiltered = categoryMatched.filter(
-        (tx) => tx.merchantName?.toLowerCase().includes(kw) ?? false
-      )
-      if (keywordFiltered.length > 0) matched = keywordFiltered
-    }
-
-    if (matched.length > 0) {
-      const total = matched.reduce((s, tx) => s + Math.abs(tx.amount), 0)
-      const label = shortAccountLabel(matched[0].accountName ?? '', matched[0].institutionName ?? '')
-      return {
-        id: item.id,
-        name: item.name,
-        type: item.type as 'income' | 'expense',
-        expectedAmount: item.expectedAmount,
-        expectedDay: item.expectedDay,
-        merchantName: item.merchantName,
-        category: item.category,
-        groupName: item.groupName ?? null,
-        intervalMonths: item.intervalMonths,
-        anchorYear: item.anchorYear,
-        anchorMonth: item.anchorMonth,
-        confirmedAmount: total,
-        confirmedCount: matched.length,
-        confirmedAccountLabel: label,
-      }
-    }
-
-    // Step 3: no category match — nothing confirmed this month.
-    return {
+    const base = {
       id: item.id,
       name: item.name,
       type: item.type as 'income' | 'expense',
-      expectedAmount: item.expectedAmount,
+      expectedAmount,
+      fixedAmount: item.expectedAmount,
+      autoAverage,
       expectedDay: item.expectedDay,
       merchantName: item.merchantName,
       category: item.category,
@@ -1078,17 +1148,28 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
       intervalMonths: item.intervalMonths,
       anchorYear: item.anchorYear,
       anchorMonth: item.anchorMonth,
-      confirmedAmount: null,
-      confirmedCount: 0,
-      confirmedAccountLabel: null,
     }
+
+    if (matched.length > 0) {
+      const total = matched.reduce((s, tx) => s + Math.abs(tx.amount), 0)
+      const label = shortAccountLabel(matched[0].accountName ?? '', matched[0].institutionName ?? '')
+      return { ...base, confirmedAmount: total, confirmedCount: matched.length, confirmedAccountLabel: label }
+    }
+    return { ...base, confirmedAmount: null, confirmedCount: 0, confirmedAccountLabel: null }
   })
 }
 
 export type RecurringMerchantWithStatus = {
   merchantName: string
   category: string
+  // For auto-average manual charges this is the trailing-12-month average
+  // (falling back to fixedAmount when there's no history); for auto-detected
+  // charges it's the detection average; for fixed manual charges it's the set value.
   avgAmount: number
+  // The raw stored amount on a manual charge — the fixed value, or the fallback
+  // for auto-average. Surfaced so the edit form seeds from the stored value.
+  fixedAmount: number
+  autoAverage: boolean
   dayOfMonth: number
   isManual: boolean
   groupName: string | null
@@ -1163,6 +1244,40 @@ export async function getRecurringMerchantsWithStatus(db: DB, year: number, mont
 
   const txs = await getRecurringCandidateTxs(db, year, month)
 
+  // For auto-average manual charges, the displayed amount is the trailing-12-month
+  // average of the merchant's transactions (mirrors committed-item auto-average).
+  // Computed once as merchant -> average of per-month sums over months with data.
+  let histByMerchant: Map<string, number> | null = null
+  if (merchants.some((m) => m.isManual && m.autoAverage)) {
+    const { end } = monthBounds(year, month)
+    const histStart = localDateString(new Date(year, month - 1 - 11, 1))
+    const histRows = await db
+      .select({ merchantName: schema.transactions.merchantName, amount: schema.transactions.amount, date: schema.transactions.date })
+      .from(schema.transactions)
+      .where(and(
+        gte(schema.transactions.date, histStart),
+        sql`${schema.transactions.date} <= ${end}`,
+        sql`${schema.transactions.amount} > 0`,
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+        sql`${schema.transactions.merchantName} IS NOT NULL`,
+      ))
+      .all()
+    const perMerchantMonth = new Map<string, Map<string, number>>()
+    for (const r of histRows) {
+      if (!r.merchantName) continue
+      if (!perMerchantMonth.has(r.merchantName)) perMerchantMonth.set(r.merchantName, new Map())
+      const mm = perMerchantMonth.get(r.merchantName)!
+      const mk = r.date.slice(0, 7)
+      mm.set(mk, (mm.get(mk) ?? 0) + Math.abs(r.amount))
+    }
+    histByMerchant = new Map()
+    for (const [mn, mm] of perMerchantMonth) {
+      const sums = [...mm.values()]
+      histByMerchant.set(mn, sums.reduce((s, a) => s + a, 0) / sums.length)
+    }
+  }
+
   const now = new Date()
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const today = now.getDate()
@@ -1192,10 +1307,16 @@ export async function getRecurringMerchantsWithStatus(db: DB, year: number, mont
       likelyCancelled = findBestRecurringMatch(prevMonthTxs, m) === null
     }
 
+    const avgAmount = (m.isManual && m.autoAverage)
+      ? (histByMerchant?.get(m.merchantName) ?? m.avgAmount)
+      : m.avgAmount
+
     return {
       merchantName: m.merchantName,
       category: m.category,
-      avgAmount: m.avgAmount,
+      avgAmount,
+      fixedAmount: m.avgAmount,
+      autoAverage: m.autoAverage,
       dayOfMonth: m.dayOfMonth,
       isManual: m.isManual,
       groupName,
