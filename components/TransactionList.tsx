@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from 'react'
 import { TransactionRow } from '@/components/TransactionRow'
-import { Search } from 'lucide-react'
-import { getCategoryColor, getCategoryLabel } from '@/lib/categories'
+import { Search, ArrowLeftRight } from 'lucide-react'
+import { getCategoryColor, getCategoryLabel, CARD_PAYMENT_CATEGORY, CARD_PAYMENT_LABEL } from '@/lib/categories'
 import type { CategoryRule } from '@/lib/categories'
 
 type Transaction = {
@@ -16,6 +16,7 @@ type Transaction = {
   customCategory: string | null
   pending: number
   ignored: number
+  isCardPayment?: boolean
 }
 
 type Props = {
@@ -32,7 +33,10 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
   const categories = useMemo(() => {
     const seen = new Map<string, number>()
     for (const tx of transactions) {
-      const cat = tx.category
+      // Card payments are grouped under one synthetic chip, not their raw
+      // Plaid category (Income / Loan payments / …), so they appear in exactly
+      // one place.
+      const cat = tx.isCardPayment ? CARD_PAYMENT_CATEGORY : tx.category
       seen.set(cat, (seen.get(cat) ?? 0) + 1)
     }
     return Array.from(seen.entries())
@@ -44,7 +48,11 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
     const q = query.trim().toLowerCase()
     return transactions.filter((tx) => {
       const matchesQuery = !q || tx.merchantName?.toLowerCase().includes(q)
-      const matchesCategory = !activeCategory || tx.category === activeCategory
+      const matchesCategory =
+        !activeCategory ||
+        (activeCategory === CARD_PAYMENT_CATEGORY
+          ? Boolean(tx.isCardPayment)
+          : tx.category === activeCategory && !tx.isCardPayment)
       return matchesQuery && matchesCategory
     })
   }, [transactions, query, activeCategory])
@@ -70,20 +78,22 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
         <div className="flex flex-wrap gap-1.5 mb-4">
           {categories.map((cat) => {
             const active = activeCategory === cat
+            const isCardPay = cat === CARD_PAYMENT_CATEGORY
             const color = getCategoryColor(cat)
             return (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(active ? null : cat)}
                 className={[
-                  'px-2.5 py-1 rounded-full text-[12px] font-medium transition-colors border',
+                  'flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-medium transition-colors border',
                   active
                     ? 'text-white border-transparent'
                     : 'bg-white text-[var(--muted-text)] border-[var(--hairline)] hover:border-current',
                 ].join(' ')}
                 style={active ? { background: color, borderColor: color } : { '--hover-color': color } as React.CSSProperties}
               >
-                {getCategoryLabel(cat)}
+                {isCardPay && <ArrowLeftRight size={11} className="shrink-0" />}
+                {isCardPay ? CARD_PAYMENT_LABEL : getCategoryLabel(cat)}
               </button>
             )
           })}
