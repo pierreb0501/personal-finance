@@ -21,6 +21,7 @@ import {
   deleteManualRecurring,
   updateManualRecurringCategory,
   addCommittedItem as dbAddCommittedItem,
+  updateCommittedItem as dbUpdateCommittedItem,
   deleteCommittedItem as dbDeleteCommittedItem,
   setCommittedItemGroup as dbSetCommittedItemGroup,
   setManualRecurringGroup as dbSetManualRecurringGroup,
@@ -107,10 +108,11 @@ export async function dismissRecurring(merchantName: string): Promise<void> {
   revalidatePath('/recurring')
 }
 
-export async function addRecurring(merchantName: string, dayOfMonth: number, avgAmount: number, category: string): Promise<void> {
-  await addManualRecurring(db, merchantName.trim(), dayOfMonth, avgAmount, category)
+export async function addRecurring(merchantName: string, dayOfMonth: number, avgAmount: number, category: string, autoAverage?: boolean): Promise<void> {
+  await addManualRecurring(db, merchantName.trim(), dayOfMonth, avgAmount, category, autoAverage)
   revalidatePath('/spending')
   revalidatePath('/recurring')
+  revalidatePath('/calendar')
 }
 
 export async function removeManualRecurring(merchantName: string): Promise<void> {
@@ -139,8 +141,9 @@ export async function addCommittedIncomeItem(
   intervalMonths?: number,
   anchorYear?: number,
   anchorMonth?: number,
+  autoAverage?: boolean,
 ): Promise<void> {
-  await dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth)
+  await dbAddCommittedItem(db, name, 'income', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth, autoAverage)
   revalidatePath('/spending')
   revalidatePath('/recurring')
   revalidatePath('/calendar')
@@ -155,8 +158,37 @@ export async function addCommittedExpenseItem(
   intervalMonths?: number,
   anchorYear?: number,
   anchorMonth?: number,
+  autoAverage?: boolean,
 ): Promise<void> {
-  await dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth)
+  await dbAddCommittedItem(db, name, 'expense', expectedAmount, category, expectedDay, merchantName, intervalMonths, anchorYear, anchorMonth, autoAverage)
+  revalidatePath('/spending')
+  revalidatePath('/recurring')
+  revalidatePath('/calendar')
+}
+
+export async function updateCommittedItem(
+  id: string,
+  name: string,
+  expectedAmount: number,
+  category: string,
+  expectedDay?: number,
+  merchantName?: string,
+  intervalMonths?: number,
+  anchorYear?: number,
+  anchorMonth?: number,
+  autoAverage?: boolean,
+): Promise<void> {
+  await dbUpdateCommittedItem(db, id, {
+    name,
+    expectedAmount,
+    category,
+    expectedDay: expectedDay ?? null,
+    merchantName: merchantName ?? null,
+    intervalMonths: intervalMonths ?? 1,
+    anchorYear: anchorYear ?? null,
+    anchorMonth: anchorMonth ?? null,
+    autoAverage: autoAverage ? 1 : 0,
+  })
   revalidatePath('/spending')
   revalidatePath('/recurring')
   revalidatePath('/calendar')

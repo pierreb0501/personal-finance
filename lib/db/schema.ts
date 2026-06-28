@@ -105,6 +105,11 @@ export const manualRecurring = sqliteTable('manual_recurring', {
   category: text('category').notNull(),
   groupName: text('group_name'),
   createdAt: integer('created_at').notNull(),
+  // When 1, the displayed amount is the trailing 12-month average of the
+  // merchant's transactions (mirrors committed_items.auto_average); avg_amount
+  // is then the fallback used until there's history. When 0, avg_amount is a
+  // fixed user-set value.
+  autoAverage: integer('auto_average').notNull().default(0),
 })
 
 export const dismissedRecurring = sqliteTable('dismissed_recurring', {
@@ -127,6 +132,11 @@ export const committedItems = sqliteTable('committed_items', {
   intervalMonths: integer('interval_months').notNull().default(1),
   anchorYear: integer('anchor_year'),    // nullable — only required when intervalMonths > 1
   anchorMonth: integer('anchor_month'),  // nullable — 1-indexed
+  // When 1, the displayed expected amount is the trailing 12-month average of
+  // matched transactions (for bills that drift, e.g. telecom). When 0, the fixed
+  // expected_amount the user entered is used. expected_amount is retained either
+  // way as the fallback when there's no history to average yet.
+  autoAverage: integer('auto_average').notNull().default(0),
 })
 
 export const recurringMerchantGroups = sqliteTable('recurring_merchant_groups', {
