@@ -21,6 +21,7 @@ type Transaction = {
   customCategory?: string | null
   ignored?: number
   accountLabel?: string
+  isCardPayment?: boolean
 }
 
 type Props = {
@@ -63,7 +64,7 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
             >
               {displayName}
             </p>
-            {isCredit && !ignored && (
+            {isCredit && !ignored && !tx.isCardPayment && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--positive)] bg-[#e8f4ed] px-1.5 py-0.5 rounded-full shrink-0">
                 Received
               </span>
@@ -91,6 +92,7 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
               merchantName={tx.merchantName}
               category={tx.category}
               isCredit={isCredit}
+              isCardPayment={tx.isCardPayment}
               knownCustomCategories={knownCustomCategories}
             />
           )}

@@ -22,7 +22,12 @@ function initials(name: string) {
 
 export function AccountRow({ account }: { account: Account }) {
   const liability = isLiability(account.type)
-  const balance = liability ? -Math.abs(account.balanceCurrent) : account.balanceCurrent
+  // Signed contribution to net worth. Liabilities subtract (you owe), so a
+  // positive credit-card balance is shown as a negative. But a *negative*
+  // credit-card balance means the card is in credit (overpaid / refund), which
+  // adds to net worth — show it as a positive in green, matching the snapshot.
+  const balance = liability ? -account.balanceCurrent : account.balanceCurrent
+  const negative = balance < 0
   return (
     <div className="flex items-center justify-between py-3 border-b border-[var(--hairline)] last:border-0">
       <div className="flex items-center gap-3">
@@ -37,10 +42,10 @@ export function AccountRow({ account }: { account: Account }) {
       <p
         className={[
           'text-[14px] font-semibold tabular-nums',
-          liability ? 'text-[var(--negative)]' : 'text-[var(--ink)]',
+          negative ? 'text-[var(--negative)]' : liability ? 'text-[var(--positive)]' : 'text-[var(--ink)]',
         ].join(' ')}
       >
-        {liability ? '-' : ''}{formatCAD(Math.abs(balance))}
+        {negative ? '-' : ''}{formatCAD(Math.abs(balance))}
       </p>
     </div>
   )

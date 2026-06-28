@@ -1,10 +1,9 @@
-import { eq, inArray, ne, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import type { DB } from './db/index'
 import * as schema from './db/schema'
 import { db as defaultDb } from './db/index'
 import { plaidClient } from './plaid'
 import { applyAllCategoryRules } from './db/queries'
-import { MANUAL_IMPORT_ITEM_ID } from './constants'
 
 type Item = typeof schema.items.$inferSelect
 
@@ -13,7 +12,6 @@ type Item = typeof schema.items.$inferSelect
 export async function syncAll(db: DB = defaultDb) {
   const allItems = await db.select().from(schema.items).all()
   for (const item of allItems) {
-    if (item.id === MANUAL_IMPORT_ITEM_ID) continue
     await syncItemReconcilingStatus(db, item)
   }
   await runPostSync(db)
@@ -58,7 +56,6 @@ async function runPostSync(db: DB) {
 // reconciliation and post-processing syncAll applies, so a Plaid-triggered update
 // is never a second-class sync (missing category rules, snapshots, or status fix-ups).
 export async function syncSingleItem(db: DB = defaultDb, item: Item) {
-  if (item.id === MANUAL_IMPORT_ITEM_ID) return
   await syncItemReconcilingStatus(db, item)
   await runPostSync(db)
 }
@@ -405,7 +402,6 @@ async function writeSnapshot(db: DB) {
       liabilities: sql<number>`COALESCE(SUM(CASE WHEN type IN ('credit', 'loan') THEN balance_current ELSE 0 END), 0)`,
     })
     .from(schema.accounts)
-    .where(ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID))
     .get()
 
   // Use investment account balance_current directly — this is the exact value

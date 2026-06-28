@@ -41,10 +41,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Database
+# Database — local libsql files (dev DB and any leftovers); never commit
 finance.db
 finance.db-shm
 finance.db-wal
+finance-dev.db
+finance-dev.db-shm
+finance-dev.db-wal
 
 # Environment
 .env.local

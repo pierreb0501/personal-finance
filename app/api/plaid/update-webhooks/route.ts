@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { items } from '@/lib/db/schema'
 import { plaidClient } from '@/lib/plaid'
-import { MANUAL_IMPORT_ITEM_ID } from '@/lib/constants'
-import { ne } from 'drizzle-orm'
 import { requireAuth, verifySameOrigin } from '@/lib/api-auth'
 
 // One-time route to register the webhook URL on all existing Plaid items.
@@ -19,7 +17,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'NEXT_PUBLIC_APP_URL is not set' }, { status: 500 })
   }
 
-  const allItems = await db.select().from(items).where(ne(items.id, MANUAL_IMPORT_ITEM_ID)).all()
+  const allItems = await db.select().from(items).all()
   const results: { institution: string; ok: boolean; error?: string }[] = []
 
   for (const item of allItems) {

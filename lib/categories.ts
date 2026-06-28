@@ -13,6 +13,14 @@ export const PALETTE = [
 
 export const PALETTE_FALLBACK = '#94A3B8'
 
+// Reserved category used as the manual override marker for credit-card payments.
+// Setting a transaction's customCategory to this forces it to be treated as a
+// card payment (a transfer, excluded from spend/income); picking any real
+// category instead forces it off. It is NOT a user-editable custom category and
+// never appears in budget/category lists.
+export const CARD_PAYMENT_CATEGORY = 'CARD_PAYMENT'
+export const CARD_PAYMENT_LABEL = 'Card payment'
+
 export const CATEGORY_LABELS: Record<string, string> = {
   FOOD_AND_DRINK:       'Food & Drink',
   GENERAL_MERCHANDISE:  'Shopping',

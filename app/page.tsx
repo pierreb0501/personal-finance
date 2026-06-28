@@ -41,6 +41,14 @@ function formatDate(): string {
   })
 }
 
+// Credit balances: positive = you owe (red), negative = overpaid/credit (green),
+// zero = settled (black). Full literal class strings so Tailwind keeps them.
+function balanceColorClass(n: number): string {
+  if (n > 0) return 'text-[var(--negative)]'
+  if (n < 0) return 'text-[var(--positive)]'
+  return 'text-[var(--ink)]'
+}
+
 export default async function OverviewPage() {
   const latest = await getLatestSnapshot(db)
   const history = await getAllSnapshotHistory(db)
@@ -161,7 +169,7 @@ export default async function OverviewPage() {
               </h3>
               <p className="text-[13px] text-[var(--muted-text)] mt-0.5">What you currently owe</p>
             </div>
-            <p className="font-bold text-[24px] tracking-tight tabular-nums leading-none text-[var(--negative)]">
+            <p className={`font-bold text-[24px] tracking-tight tabular-nums leading-none ${balanceColorClass(totalOwed)}`}>
               {formatCAD(totalOwed)}
             </p>
           </div>
@@ -169,7 +177,7 @@ export default async function OverviewPage() {
             {cardBalances.map((c) => (
               <div key={c.label} className="flex items-center justify-between text-[13px]">
                 <span className="font-medium text-[var(--ink)]">{c.label}</span>
-                <span className="font-semibold tabular-nums text-[var(--negative)]">{formatCAD(c.balance)}</span>
+                <span className={`font-semibold tabular-nums ${balanceColorClass(c.balance)}`}>{formatCAD(c.balance)}</span>
               </div>
             ))}
           </div>

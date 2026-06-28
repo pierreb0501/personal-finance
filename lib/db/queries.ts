@@ -1,8 +1,7 @@
-import { desc, eq, and, gte, sql, asc, inArray, ne } from 'drizzle-orm'
+import { desc, eq, and, gte, sql, asc, inArray } from 'drizzle-orm'
 import * as schema from './schema'
 import type { DB } from './index'
-import { applyCategoryRules, slugifyCategory, CATEGORY_LABELS, type CategoryRule } from '@/lib/categories'
-import { MANUAL_IMPORT_ITEM_ID } from '@/lib/constants'
+import { applyCategoryRules, slugifyCategory, CATEGORY_LABELS, CARD_PAYMENT_CATEGORY, type CategoryRule } from '@/lib/categories'
 
 function shortAccountLabel(accountName: string, institutionName: string): string {
   const inst = institutionName.toLowerCase()
@@ -61,7 +60,6 @@ export async function getAllAccounts(db: DB) {
   return db
     .select()
     .from(schema.accounts)
-    .where(ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID))
     .orderBy(asc(schema.accounts.type), asc(schema.accounts.name))
     .all()
 }
@@ -75,7 +73,7 @@ export async function getCreditCardBalances(db: DB) {
     })
     .from(schema.accounts)
     .leftJoin(schema.items, eq(schema.accounts.itemId, schema.items.id))
-    .where(and(eq(schema.accounts.type, 'credit'), ne(schema.accounts.itemId, MANUAL_IMPORT_ITEM_ID)))
+    .where(eq(schema.accounts.type, 'credit'))
     .all()
 
   return rows
@@ -98,7 +96,6 @@ export async function getAllItemsWithAccounts(db: DB) {
   const itemRows = await db
     .select()
     .from(schema.items)
-    .where(ne(schema.items.id, MANUAL_IMPORT_ITEM_ID))
     .orderBy(asc(schema.items.institutionName))
     .all()
 
@@ -127,10 +124,6 @@ export async function deleteAccount(db: DB, accountId: string): Promise<{ itemDe
   await db.delete(schema.holdings).where(eq(schema.holdings.accountId, accountId)).run()
   await db.delete(schema.transactions).where(eq(schema.transactions.accountId, accountId)).run()
   await db.delete(schema.accounts).where(eq(schema.accounts.id, accountId)).run()
-
-  if (account.itemId === MANUAL_IMPORT_ITEM_ID) {
-    return { itemDeleted: false, accessToken: null }
-  }
 
   const remaining = await db
     .select({ id: schema.accounts.id })
@@ -163,6 +156,66 @@ export async function getLastSyncedAt(db: DB): Promise<number | null> {
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
 
+// ─── Credit-card payment detection ──────────────────────────────────────────
+// A credit-card payment is a transfer between your own accounts — never spend or
+// income. Plaid emits two legs we detect structurally (no cross-account matching):
+//   • Outflow leg — money leaving a depository account to pay the card. Plaid
+//     tags it LOAN_PAYMENTS_CREDIT_CARD_PAYMENT, its one reliable signal.
+//   • Inflow leg — the credit landing on the card. Plaid mislabels this
+//     (INCOME, TRANSFER_IN, …), so we identify it by *where it lands*: any credit
+//     on a credit-type account categorised as income/transfer/loan-payment.
+// A manual customCategory always wins (the user explicitly re-labelled the row);
+// to force-exclude a payment Plaid missed, mark the transaction ignored.
+
+const CARD_PAYMENT_INFLOW_CATEGORIES = new Set(['INCOME', 'TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS'])
+
+// SQL predicate for "exclude this row from spend as a card payment" — covers the
+// manual force-on marker (either leg) and the auto-detected outflow. (The auto
+// inflow is amount < 0 with no customCategory, which spend aggregates already drop.)
+// Spend aggregates run on the transactions table alone, no account join. Returns a
+// fresh fragment per call so it can be embedded in multiple queries safely.
+function excludedAsCardPayment() {
+  // NULL-safe: `customCategory = 'CARD_PAYMENT'` yields NULL (not false) when
+  // customCategory IS NULL, and that NULL propagates through the surrounding
+  // `NOT (...)`, wrongly filtering out every un-labelled row. Guard with IS NOT NULL.
+  return sql`((${schema.transactions.customCategory} IS NOT NULL AND ${schema.transactions.customCategory} = ${CARD_PAYMENT_CATEGORY}) OR (${schema.transactions.categoryDetailed} = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' AND ${schema.transactions.customCategory} IS NULL))`
+}
+
+// Full spend-inclusion predicate: outflows plus user-labelled inflows that offset
+// a category, minus credit-card payments. Shared by every spend aggregate so the
+// rule can't drift between them.
+function spendInclusion() {
+  return sql`(${schema.transactions.amount} > 0 OR (${schema.transactions.amount} < 0 AND ${schema.transactions.customCategory} IS NOT NULL)) AND NOT ${excludedAsCardPayment()}`
+}
+
+// JS mirror of the detection, for code paths that reconcile in memory (committed
+// income/expense matching). Catches both legs so a payment is never counted as
+// confirmed income or expense. Manual override wins in both directions: the
+// reserved CARD_PAYMENT marker forces on; any other customCategory forces off.
+function isCardPayment(tx: {
+  amount: number
+  category: string
+  categoryDetailed: string | null
+  customCategory: string | null
+  merchantName: string | null
+  accountType: string | null
+}): boolean {
+  if (tx.customCategory === CARD_PAYMENT_CATEGORY) return true
+  if (tx.customCategory) return false
+  if (tx.categoryDetailed === 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT') return true
+  // Inflow leg: a credit landing on a credit-type account. A real payment comes
+  // from your bank and carries no merchant; a refund comes from a store and keeps
+  // a merchant (and usually a spend category). Requiring "no merchant" here means
+  // a refund is never mistaken for a payment, even if Plaid mis-tags it as
+  // income/transfer.
+  return (
+    tx.accountType === 'credit' &&
+    tx.amount < 0 &&
+    !tx.merchantName &&
+    CARD_PAYMENT_INFLOW_CATEGORIES.has(tx.category)
+  )
+}
+
 export async function getMonthlySpend(db: DB, year?: number, month?: number): Promise<number> {
   const { start, end } = monthBounds(year, month)
   const result = await db
@@ -172,8 +225,9 @@ export async function getMonthlySpend(db: DB, year?: number, month?: number): Pr
       and(
         gte(schema.transactions.date, start),
         sql`${schema.transactions.date} <= ${end}`,
-        // Include regular expenses AND labeled transfer-ins (which reduce spend)
-        sql`(${schema.transactions.amount} > 0 OR (${schema.transactions.amount} < 0 AND ${schema.transactions.customCategory} IS NOT NULL))`,
+        // Include regular expenses AND labeled transfer-ins (which reduce spend),
+        // excluding credit-card payment outflows (transfers, not spend).
+        spendInclusion(),
         eq(schema.transactions.pending, 0),
         eq(schema.transactions.ignored, 0),
       ),
@@ -199,6 +253,8 @@ export async function getSpendByAccount(db: DB, year?: number, month?: number) {
         gte(schema.transactions.date, start),
         sql`${schema.transactions.date} <= ${end}`,
         sql`${schema.transactions.amount} > 0`,
+        // Exclude credit-card payments (transfers, not spend).
+        sql`NOT ${excludedAsCardPayment()}`,
         eq(schema.transactions.pending, 0),
         eq(schema.transactions.ignored, 0),
       ),
@@ -232,8 +288,9 @@ export async function getCategoryBreakdown(db: DB, year?: number, month?: number
       and(
         gte(schema.transactions.date, start),
         sql`${schema.transactions.date} <= ${end}`,
-        // Include regular expenses AND labeled transfer-ins (deducted from their category)
-        sql`(${schema.transactions.amount} > 0 OR (${schema.transactions.amount} < 0 AND ${schema.transactions.customCategory} IS NOT NULL))`,
+        // Include regular expenses AND labeled transfer-ins (deducted from their
+        // category), excluding credit-card payment outflows (transfers, not spend).
+        spendInclusion(),
         eq(schema.transactions.pending, 0),
         eq(schema.transactions.ignored, 0),
       ),
@@ -267,6 +324,7 @@ export async function getRecentTransactions(db: DB, limit = 20) {
       merchantName: schema.transactions.merchantName,
       rawName: schema.transactions.rawName,
       category: schema.transactions.category,
+      categoryDetailed: schema.transactions.categoryDetailed,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
       ignored: schema.transactions.ignored,
@@ -283,7 +341,13 @@ export async function getRecentTransactions(db: DB, limit = 20) {
     .all()
 
   return applyCategoryRules(
-    rows.map((r) => ({ ...r, merchantName: r.merchantName ?? null, customCategory: r.customCategory ?? null })),
+    rows.map((r) => ({
+      ...r,
+      merchantName: r.merchantName ?? null,
+      customCategory: r.customCategory ?? null,
+      // amount > 0 here, so only the outflow leg can match (accountType irrelevant).
+      isCardPayment: isCardPayment({ ...r, customCategory: r.customCategory ?? null, merchantName: r.merchantName ?? null, accountType: null }),
+    })),
     rules,
   )
 }
@@ -300,10 +364,12 @@ export async function getTransactionsForMonth(db: DB, year: number, month: numbe
       merchantName: schema.transactions.merchantName,
       rawName: schema.transactions.rawName,
       category: schema.transactions.category,
+      categoryDetailed: schema.transactions.categoryDetailed,
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
       ignored: schema.transactions.ignored,
       accountName: schema.accounts.name,
+      accountType: schema.accounts.type,
       institutionName: schema.items.institutionName,
     })
     .from(schema.transactions)
@@ -325,6 +391,7 @@ export async function getTransactionsForMonth(db: DB, year: number, month: numbe
       merchantName: r.merchantName ?? null,
       customCategory: r.customCategory ?? null,
       accountLabel: shortAccountLabel(r.accountName ?? '', r.institutionName ?? ''),
+      isCardPayment: isCardPayment({ ...r, customCategory: r.customCategory ?? null, merchantName: r.merchantName ?? null }),
     })),
     rules,
   )
@@ -728,7 +795,7 @@ export async function getCategoryTrendMonths(db: DB, count = 6) {
     .where(
       and(
         gte(schema.transactions.date, rangeStart),
-        sql`(${schema.transactions.amount} > 0 OR (${schema.transactions.amount} < 0 AND ${schema.transactions.customCategory} IS NOT NULL))`,
+        spendInclusion(),
         eq(schema.transactions.pending, 0),
         eq(schema.transactions.ignored, 0),
       )
@@ -805,7 +872,24 @@ export async function addCustomCategory(db: DB, name: string, color?: string): P
 }
 
 export async function deleteCustomCategory(db: DB, id: string): Promise<void> {
+  const cat = await db
+    .select({ name: schema.customCategories.name })
+    .from(schema.customCategories)
+    .where(eq(schema.customCategories.id, id))
+    .get()
+
   await db.delete(schema.customCategories).where(eq(schema.customCategories.id, id)).run()
+  if (!cat) return
+
+  // Clean up everything that referenced the label, otherwise it lingers on data
+  // after its definition is gone: transactions keep showing it, merchant rules
+  // keep re-applying it, and orphaned budget/label rows survive. Reverting a
+  // transaction's customCategory to NULL drops it back to its Plaid category
+  // (and re-enables credit-card-payment auto-detection on those rows).
+  await db.update(schema.transactions).set({ customCategory: null }).where(eq(schema.transactions.customCategory, cat.name)).run()
+  await db.delete(schema.categoryRules).where(eq(schema.categoryRules.category, cat.name)).run()
+  await db.delete(schema.categoryBudgets).where(eq(schema.categoryBudgets.category, cat.name)).run()
+  await db.delete(schema.categoryLabels).where(eq(schema.categoryLabels.category, cat.name)).run()
 }
 
 // Registers `category` as a known custom category (so it shows up wherever
@@ -817,7 +901,8 @@ export async function deleteCustomCategory(db: DB, id: string): Promise<void> {
 // budgeted because it never reaches the custom_categories table.
 export async function ensureCustomCategory(db: DB, category: string): Promise<void> {
   const slug = slugifyCategory(category)
-  if (!slug || CATEGORY_LABELS[slug]) return
+  // CARD_PAYMENT is a reserved override marker, not a budgetable custom category.
+  if (!slug || slug === CARD_PAYMENT_CATEGORY || CATEGORY_LABELS[slug]) return
   const existing = await db
     .select({ id: schema.customCategories.id })
     .from(schema.customCategories)
@@ -906,14 +991,16 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
   const allItems = await getCommittedItems(db)
   const items = allItems.filter((item) => isItemDueInMonth(item, year, month))
 
-  const txs = await db
+  const allTxs = await db
     .select({
       id: schema.transactions.id,
       amount: schema.transactions.amount,
       merchantName: schema.transactions.merchantName,
       category: schema.transactions.category,
+      categoryDetailed: schema.transactions.categoryDetailed,
       customCategory: schema.transactions.customCategory,
       accountName: schema.accounts.name,
+      accountType: schema.accounts.type,
       institutionName: schema.items.institutionName,
     })
     .from(schema.transactions)
@@ -928,6 +1015,9 @@ export async function getCommittedItemsWithStatus(db: DB, year: number, month: n
       )
     )
     .all()
+
+  // Credit-card payment legs are transfers — never confirmed income or expense.
+  const txs = allTxs.filter((tx) => !isCardPayment(tx))
 
   return items.map((item) => {
     const isIncome = item.type === 'income'
