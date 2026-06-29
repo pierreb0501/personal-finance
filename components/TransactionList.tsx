@@ -16,6 +16,7 @@ type Transaction = {
   customCategory: string | null
   pending: number
   ignored: number
+  spreadMonths?: number | null
   isCardPayment?: boolean
 }
 
@@ -39,10 +40,18 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
       const cat = tx.isCardPayment ? CARD_PAYMENT_CATEGORY : tx.category
       seen.set(cat, (seen.get(cat) ?? 0) + 1)
     }
-    return Array.from(seen.entries())
+    const list = Array.from(seen.entries())
       .sort((a, b) => b[1] - a[1])
-      .map(([cat]) => cat)
-  }, [transactions])
+      .map(([cat, count]) => ({ cat, count }))
+    // The active filter persists across month navigation, but its chip only
+    // renders if this month has matching transactions. Always include it as a
+    // dimmed "ghost" chip (count 0) so the filter is never stuck and
+    // undismissable in a month that lacks that category.
+    if (activeCategory && !seen.has(activeCategory)) {
+      list.push({ cat: activeCategory, count: 0 })
+    }
+    return list
+  }, [transactions, activeCategory])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -74,10 +83,11 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
       </div>
 
       {/* Category chips */}
-      {categories.length > 1 && (
+      {(categories.length > 1 || (categories.length === 1 && categories[0].count === 0)) && (
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {categories.map((cat) => {
+          {categories.map(({ cat, count }) => {
             const active = activeCategory === cat
+            const ghost = count === 0
             const isCardPay = cat === CARD_PAYMENT_CATEGORY
             const color = getCategoryColor(cat)
             return (
@@ -88,12 +98,15 @@ export function TransactionList({ transactions, rules, knownCustomCategories, re
                   'flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-medium transition-colors border',
                   active
                     ? 'text-white border-transparent'
-                    : 'bg-white text-[var(--muted-text)] border-[var(--hairline)] hover:border-current',
+                    : ghost
+                      ? 'bg-white text-[var(--faint)] border-dashed border-[var(--hairline)] hover:border-current'
+                      : 'bg-white text-[var(--muted-text)] border-[var(--hairline)] hover:border-current',
                 ].join(' ')}
                 style={active ? { background: color, borderColor: color } : { '--hover-color': color } as React.CSSProperties}
               >
                 {isCardPay && <ArrowLeftRight size={11} className="shrink-0" />}
                 {isCardPay ? CARD_PAYMENT_LABEL : getCategoryLabel(cat)}
+                {ghost && <span className="opacity-70">· 0</span>}
               </button>
             )
           })}

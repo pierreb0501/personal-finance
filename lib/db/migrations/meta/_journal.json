@@ -127,6 +127,13 @@
       "when": 1782588686274,
       "tag": "0017_manual_recurring_auto_average",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1782694800558,
+      "tag": "0018_spread_months",
+      "breakpoints": true
     }
   ]
 }

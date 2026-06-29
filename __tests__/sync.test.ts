@@ -1,5 +1,6 @@
 import { createClient } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
+import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/libsql/migrator'
 import path from 'path'
 import os from 'os'
@@ -107,6 +108,95 @@ describe('syncItem', () => {
 
     const updatedItem = (await db.select().from(schema.items).get())!
     expect(updatedItem.cursor).toBe('cursor-2')
+  })
+
+  it('falls back to a normalized raw_name when Plaid gives no merchant_name', async () => {
+    const item = await seedItem(db)
+
+    mockedPlaid.accountsGet.mockResolvedValue({
+      data: {
+        accounts: [{
+          account_id: 'plaid-acc-1', name: 'Chequing', type: 'depository',
+          subtype: 'checking', balances: { current: 5000, available: 4800 },
+          iso_currency_code: 'CAD',
+        }],
+      },
+    } as any)
+
+    mockedPlaid.transactionsSync.mockResolvedValue({
+      data: {
+        added: [{
+          transaction_id: 'tx-raw', account_id: 'plaid-acc-1', amount: 12,
+          date: '2026-05-01', merchant_name: null, name: 'SQ *BLUE BOTTLE 3491 MONTREAL QC',
+          personal_finance_category: { primary: 'FOOD_AND_DRINK', detailed: 'FOOD_AND_DRINK_COFFEE' },
+          pending: false,
+        }],
+        modified: [],
+        removed: [],
+        next_cursor: 'cursor-2',
+        has_more: false,
+      },
+    } as any)
+
+    mockedPlaid.investmentsHoldingsGet.mockRejectedValue(new Error('not supported'))
+
+    await syncItem(db, item)
+
+    const tx = (await db.select().from(schema.transactions).get())!
+    // Display/match name is the cleaned merchant; the true raw descriptor is preserved.
+    expect(tx.merchantName).toBe('Blue Bottle Montreal')
+    expect(tx.rawName).toBe('SQ *BLUE BOTTLE 3491 MONTREAL QC')
+  })
+
+  it('leaves merchantless credit-card-payment inflows nameless, but names refunds', async () => {
+    const item = await seedItem(db)
+
+    mockedPlaid.accountsGet.mockResolvedValue({
+      data: {
+        accounts: [{
+          account_id: 'plaid-acc-1', name: 'Amex', type: 'credit',
+          subtype: 'credit card', balances: { current: -500, available: null },
+          iso_currency_code: 'CAD',
+        }],
+      },
+    } as any)
+
+    mockedPlaid.transactionsSync.mockResolvedValue({
+      data: {
+        added: [
+          {
+            // Card payment: money landing on the card (amount < 0), no merchant,
+            // payment-ish category → must stay null so isCardPayment still flags it.
+            transaction_id: 'tx-pay', account_id: 'plaid-acc-1', amount: -300,
+            date: '2026-05-01', merchant_name: null, name: 'PAYMENT RECEIVED - THANK YOU',
+            personal_finance_category: { primary: 'TRANSFER_IN', detailed: 'TRANSFER_IN_ACCOUNT_TRANSFER' },
+            pending: false,
+          },
+          {
+            // Refund on the same credit card (amount < 0) but a SPEND category — not
+            // a card payment, so it should still get a clean, ruleable name.
+            transaction_id: 'tx-refund', account_id: 'plaid-acc-1', amount: -45.97,
+            date: '2026-05-02', merchant_name: null, name: 'ALDO MONTREAL QC',
+            personal_finance_category: { primary: 'GENERAL_MERCHANDISE', detailed: 'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES' },
+            pending: false,
+          },
+        ],
+        modified: [],
+        removed: [],
+        next_cursor: 'cursor-2',
+        has_more: false,
+      },
+    } as any)
+
+    mockedPlaid.investmentsHoldingsGet.mockRejectedValue(new Error('not supported'))
+
+    await syncItem(db, item)
+
+    const pay = (await db.select().from(schema.transactions).where(eq(schema.transactions.id, 'tx-pay')).get())!
+    expect(pay.merchantName).toBeNull()
+
+    const refund = (await db.select().from(schema.transactions).where(eq(schema.transactions.id, 'tx-refund')).get())!
+    expect(refund.merchantName).toBe('Aldo Montreal')
   })
 
   it('drops transactions referencing an unmapped account without throwing', async () => {

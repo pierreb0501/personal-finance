@@ -11,6 +11,7 @@ import {
   upsertSetting,
   updateTransactionCategory,
   setTransactionIgnored,
+  setTransactionSpread as dbSetTransactionSpread,
   upsertCategoryBudget,
   deleteCategoryBudget as dbDeleteCategoryBudget,
   addCustomCategory as dbAddCustomCategory,
@@ -71,6 +72,15 @@ export async function saveIncome(amount: number): Promise<void> {
 
 export async function toggleIgnoreTransaction(txId: string, ignored: boolean): Promise<void> {
   await setTransactionIgnored(db, txId, ignored)
+  revalidatePath('/')
+  revalidatePath('/spending')
+  revalidatePath('/budget')
+}
+
+// Spread a transaction's amount across N months on accrual surfaces (trends,
+// budget). months <= 1 clears the spread. Cash surfaces are unaffected.
+export async function setTransactionSpread(txId: string, months: number): Promise<void> {
+  await dbSetTransactionSpread(db, txId, months)
   revalidatePath('/')
   revalidatePath('/spending')
   revalidatePath('/budget')

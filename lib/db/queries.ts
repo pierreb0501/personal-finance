@@ -1,7 +1,8 @@
-import { desc, eq, and, gte, sql, asc, inArray } from 'drizzle-orm'
+import { desc, eq, and, gte, lt, gt, or, sql, asc, inArray } from 'drizzle-orm'
 import * as schema from './schema'
 import type { DB } from './index'
 import { applyCategoryRules, slugifyCategory, CATEGORY_LABELS, CARD_PAYMENT_CATEGORY, type CategoryRule } from '@/lib/categories'
+import { expandAmortized, type YearMonth } from '@/lib/amortize'
 
 function shortAccountLabel(accountName: string, institutionName: string): string {
   const inst = institutionName.toLowerCase()
@@ -167,7 +168,11 @@ export async function getLastSyncedAt(db: DB): Promise<number | null> {
 // A manual customCategory always wins (the user explicitly re-labelled the row);
 // to force-exclude a payment Plaid missed, mark the transaction ignored.
 
-const CARD_PAYMENT_INFLOW_CATEGORIES = new Set(['INCOME', 'TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS'])
+// Primary categories an inflow can carry and still be a credit-card payment (vs a
+// store refund, which carries a spend category). Exported so the sync layer can use
+// the exact same set when deciding whether a merchantless inflow must stay nameless
+// to preserve card-payment detection — keeping the two in lockstep.
+export const CARD_PAYMENT_INFLOW_CATEGORIES = new Set(['INCOME', 'TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS'])
 
 // SQL predicate for "exclude this row from spend as a card payment" — covers the
 // manual force-on marker (either leg) and the auto-detected outflow. (The auto
@@ -186,6 +191,101 @@ function excludedAsCardPayment() {
 // rule can't drift between them.
 function spendInclusion() {
   return sql`(${schema.transactions.amount} > 0 OR (${schema.transactions.amount} < 0 AND ${schema.transactions.customCategory} IS NOT NULL)) AND NOT ${excludedAsCardPayment()}`
+}
+
+// ─── Accrual amortization (analytics overlay) ───────────────────────────────
+// A handful of postings are spread over multiple months (spread_months > 1) so
+// accrual surfaces (trends, savings rate, budget) show an even monthly slice
+// instead of one spike. Cash surfaces must NOT use this. The pattern at every
+// accrual call site: keep the existing SQL sum but restrict it to non-amortized
+// rows via notAmortized(), then overlay the expanded slices from
+// selectAmortizedRows(). The slice math lives once in lib/amortize.ts.
+
+// SQL predicate: this row books entirely in its posting month (normal behaviour).
+function notAmortized() {
+  return sql`(${schema.transactions.spreadMonths} IS NULL OR ${schema.transactions.spreadMonths} <= 1)`
+}
+
+type AmortizedRow = {
+  date: string
+  amount: number
+  spreadMonths: number | null
+  category: string
+  categoryDetailed: string | null
+  customCategory: string | null
+  merchantName: string | null
+  accountType: string | null
+}
+
+// All amortized postings (spread_months > 1), posted and not ignored, with the
+// account type needed for card-payment detection. There are few of these, so we
+// fetch them all and let expandAmortized clip to each surface's window.
+async function selectAmortizedRows(db: DB): Promise<AmortizedRow[]> {
+  return db
+    .select({
+      date: schema.transactions.date,
+      amount: schema.transactions.amount,
+      spreadMonths: schema.transactions.spreadMonths,
+      category: schema.transactions.category,
+      categoryDetailed: schema.transactions.categoryDetailed,
+      customCategory: schema.transactions.customCategory,
+      merchantName: schema.transactions.merchantName,
+      accountType: schema.accounts.type,
+    })
+    .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .where(
+      and(
+        gt(schema.transactions.spreadMonths, 1),
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      ),
+    )
+    .all()
+}
+
+// Overlay accrual SPEND slices from amortized rows. Mirrors spendInclusion() (an
+// outflow, or a labelled inflow that offsets a category) minus card payments,
+// keyed on the post-relabel category — exactly what the spend aggregates use.
+function addAmortizedSpend(
+  rows: AmortizedRow[],
+  ruleMap: Map<string, string>,
+  rangeStart: YearMonth,
+  rangeEnd: YearMonth,
+  add: (year: number, month: number, category: string, amount: number) => void,
+) {
+  for (const row of rows) {
+    const included = (row.amount > 0 || (row.amount < 0 && !!row.customCategory)) && !isCardPayment(row)
+    if (!included) continue
+    const category =
+      row.customCategory ?? (row.merchantName ? ruleMap.get(row.merchantName) : undefined) ?? row.category
+    for (const sl of expandAmortized(row, rangeStart, rangeEnd)) {
+      add(sl.year, sl.month, category, sl.amount)
+    }
+  }
+}
+
+// Overlay accrual INCOME slices from amortized rows. Mirrors getIncomeTrendMonths'
+// definition of income (effective category is a known income category OR Plaid's
+// original category is INCOME) minus card payments. Slices are added as positive
+// income figures (inflows are stored negative).
+function addAmortizedIncome(
+  rows: AmortizedRow[],
+  ruleMap: Map<string, string>,
+  incomeCats: Set<string>,
+  rangeStart: YearMonth,
+  rangeEnd: YearMonth,
+  add: (year: number, month: number, category: string, amount: number) => void,
+) {
+  for (const row of rows) {
+    if (row.amount >= 0 || isCardPayment(row)) continue
+    const category =
+      row.customCategory ?? (row.merchantName ? ruleMap.get(row.merchantName) : undefined) ?? row.category
+    if (!(incomeCats.has(category) || row.category === 'INCOME')) continue
+    for (const sl of expandAmortized(row, rangeStart, rangeEnd)) {
+      add(sl.year, sl.month, category, -sl.amount)
+    }
+  }
 }
 
 // JS mirror of the detection, for code paths that reconcile in memory (committed
@@ -272,9 +372,31 @@ export async function getSpendByAccount(db: DB, year?: number, month?: number) {
     .sort((a, b) => b.total - a.total)
 }
 
-export async function getCategoryBreakdown(db: DB, year?: number, month?: number) {
+// Spend per category for a month. Default is cash (every posting books in its
+// month). With { accrual: true } amortized postings are spread instead: excluded
+// from the SQL sum and overlaid as this month's even slice — used by the budget
+// page so a lumpy semi-annual/annual bill doesn't blow one month's actuals.
+export async function getCategoryBreakdown(
+  db: DB,
+  year?: number,
+  month?: number,
+  opts: { accrual?: boolean } = {},
+) {
   const { start, end } = monthBounds(year, month)
   const rules = await getMerchantRules(db)
+
+  const where = [
+    gte(schema.transactions.date, start),
+    sql`${schema.transactions.date} <= ${end}`,
+    // Include regular expenses AND labeled transfer-ins (deducted from their
+    // category), excluding credit-card payment outflows (transfers, not spend).
+    spendInclusion(),
+    eq(schema.transactions.pending, 0),
+    eq(schema.transactions.ignored, 0),
+  ]
+  // In accrual mode amortized rows are spread via the overlay below, so keep them
+  // out of the posting-month SQL sum.
+  if (opts.accrual) where.push(notAmortized())
 
   const rows = await db
     .select({
@@ -284,17 +406,7 @@ export async function getCategoryBreakdown(db: DB, year?: number, month?: number
       total: sql<number>`SUM(${schema.transactions.amount})`,
     })
     .from(schema.transactions)
-    .where(
-      and(
-        gte(schema.transactions.date, start),
-        sql`${schema.transactions.date} <= ${end}`,
-        // Include regular expenses AND labeled transfer-ins (deducted from their
-        // category), excluding credit-card payment outflows (transfers, not spend).
-        spendInclusion(),
-        eq(schema.transactions.pending, 0),
-        eq(schema.transactions.ignored, 0),
-      ),
-    )
+    .where(and(...where))
     .groupBy(schema.transactions.category, schema.transactions.merchantName, schema.transactions.customCategory)
     .orderBy(desc(sql`SUM(${schema.transactions.amount})`))
     .all()
@@ -309,6 +421,16 @@ export async function getCategoryBreakdown(db: DB, year?: number, month?: number
   for (const r of applied) {
     agg.set(r.category, (agg.get(r.category) ?? 0) + r.total)
   }
+
+  if (opts.accrual) {
+    const now = new Date()
+    const ym = { year: year ?? now.getFullYear(), month: month ?? now.getMonth() + 1 }
+    const ruleMap = new Map(rules.map((r) => [r.merchantName, r.category]))
+    addAmortizedSpend(await selectAmortizedRows(db), ruleMap, ym, ym, (_y, _m, category, amount) => {
+      agg.set(category, (agg.get(category) ?? 0) + amount)
+    })
+  }
+
   return Array.from(agg.entries())
     .map(([category, total]) => ({ category, total }))
     .sort((a, b) => b.total - a.total)
@@ -368,6 +490,7 @@ export async function getTransactionsForMonth(db: DB, year: number, month: numbe
       customCategory: schema.transactions.customCategory,
       pending: schema.transactions.pending,
       ignored: schema.transactions.ignored,
+      spreadMonths: schema.transactions.spreadMonths,
       accountName: schema.accounts.name,
       accountType: schema.accounts.type,
       institutionName: schema.items.institutionName,
@@ -434,6 +557,17 @@ export async function getUnlabeledTransfers(db: DB, year?: number, month?: numbe
 export async function setTransactionIgnored(db: DB, txId: string, ignored: boolean): Promise<void> {
   await db.update(schema.transactions)
     .set({ ignored: ignored ? 1 : 0 })
+    .where(eq(schema.transactions.id, txId))
+    .run()
+}
+
+// Set (or clear) the accrual amortization window for a transaction. months <= 1
+// clears it (stored as NULL → books in the posting month). Affects accrual
+// surfaces only (trends, budget); the raw posting is never altered.
+export async function setTransactionSpread(db: DB, txId: string, months: number): Promise<void> {
+  const value = Number.isFinite(months) && months > 1 ? Math.floor(months) : null
+  await db.update(schema.transactions)
+    .set({ spreadMonths: value })
     .where(eq(schema.transactions.id, txId))
     .run()
 }
@@ -799,6 +933,7 @@ export async function getCategoryTrendMonths(db: DB, count = 6) {
       and(
         gte(schema.transactions.date, rangeStart),
         spendInclusion(),
+        notAmortized(),
         eq(schema.transactions.pending, 0),
         eq(schema.transactions.ignored, 0),
       )
@@ -828,13 +963,106 @@ export async function getCategoryTrendMonths(db: DB, count = 6) {
     })
   }
 
-  for (const row of applied) {
-    const slot = months.find(m => m.year === row.year && m.month === row.month)
-    if (!slot) continue
-    slot.breakdown.set(row.category, (slot.breakdown.get(row.category) ?? 0) + row.total)
+  const addToMonth = (year: number, month: number, category: string, amount: number) => {
+    const slot = months.find(m => m.year === year && m.month === month)
+    if (!slot) return
+    slot.breakdown.set(category, (slot.breakdown.get(category) ?? 0) + amount)
   }
 
+  for (const row of applied) addToMonth(row.year, row.month, row.category, row.total)
+
+  // Accrual overlay: amortized postings (excluded from the SQL sum above) spread
+  // across the window as even monthly slices.
+  const rangeStartYM = { year: months[0].year, month: months[0].month }
+  const rangeEndYM = { year: months[months.length - 1].year, month: months[months.length - 1].month }
+  const ruleMap = new Map(rules.map((r) => [r.merchantName, r.category]))
+  addAmortizedSpend(await selectAmortizedRows(db), ruleMap, rangeStartYM, rangeEndYM, addToMonth)
+
   return months.map(m => ({
+    year: m.year,
+    month: m.month,
+    label: m.label,
+    breakdown: Array.from(m.breakdown.entries()).map(([category, total]) => ({ category, total })),
+  }))
+}
+
+// Income counterpart to getCategoryTrendMonths. The spend trend can't be reused
+// for income: it runs spendInclusion(), which drops every unlabelled inflow (so
+// raw Plaid salary never shows), and it keys on the post-relabel category (so
+// income relabelled to a custom bucket like "Parents" falls outside the income
+// set). Here we look at inflows directly and call a row income when its effective
+// category is a known income category OR Plaid's original category is INCOME —
+// the latter catches relabelled paycheques. Card-payment inflow legs (Plaid
+// mislabels them INCOME) are filtered out structurally via isCardPayment.
+export async function getIncomeTrendMonths(db: DB, count = 6) {
+  const now = new Date()
+  const startDate = new Date(now.getFullYear(), now.getMonth() - (count - 1), 1)
+  const rangeStart = localDateString(startDate)
+
+  const [rules, incomeCats] = await Promise.all([
+    getMerchantRules(db),
+    getIncomeCategories(db),
+  ])
+  const ruleMap = new Map(rules.map((r) => [r.merchantName, r.category]))
+
+  const rows = await db
+    .select({
+      date: schema.transactions.date,
+      amount: schema.transactions.amount,
+      category: schema.transactions.category,
+      categoryDetailed: schema.transactions.categoryDetailed,
+      customCategory: schema.transactions.customCategory,
+      merchantName: schema.transactions.merchantName,
+      accountType: schema.accounts.type,
+    })
+    .from(schema.transactions)
+    .leftJoin(schema.accounts, eq(schema.transactions.accountId, schema.accounts.id))
+    .where(
+      and(
+        gte(schema.transactions.date, rangeStart),
+        lt(schema.transactions.amount, 0),
+        notAmortized(),
+        eq(schema.transactions.pending, 0),
+        eq(schema.transactions.ignored, 0),
+      )
+    )
+    .all()
+
+  const months: Array<{ year: number; month: number; label: string; breakdown: Map<string, number> }> = []
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push({
+      year: d.getFullYear(),
+      month: d.getMonth() + 1,
+      label: d.toLocaleString('en-CA', { month: 'short' }),
+      breakdown: new Map(),
+    })
+  }
+
+  const addToMonth = (year: number, month: number, category: string, amount: number) => {
+    const slot = months.find((m) => m.year === year && m.month === month)
+    if (!slot) return
+    slot.breakdown.set(category, (slot.breakdown.get(category) ?? 0) + amount)
+  }
+
+  for (const row of rows) {
+    if (isCardPayment(row)) continue
+    const effCategory =
+      row.customCategory ?? (row.merchantName ? ruleMap.get(row.merchantName) : undefined) ?? row.category
+    const isIncome = incomeCats.has(effCategory) || row.category === 'INCOME'
+    if (!isIncome) continue
+    const year = Number(row.date.slice(0, 4))
+    const month = Number(row.date.slice(5, 7))
+    // Inflows are stored negative; flip to a positive income figure.
+    addToMonth(year, month, effCategory, -row.amount)
+  }
+
+  // Accrual overlay: amortized income postings spread across the window.
+  const rangeStartYM = { year: months[0].year, month: months[0].month }
+  const rangeEndYM = { year: months[months.length - 1].year, month: months[months.length - 1].month }
+  addAmortizedIncome(await selectAmortizedRows(db), ruleMap, incomeCats, rangeStartYM, rangeEndYM, addToMonth)
+
+  return months.map((m) => ({
     year: m.year,
     month: m.month,
     label: m.label,
@@ -1531,10 +1759,15 @@ export type BudgetSummary = {
   unbudgetedSpend: number; unbudgetedCount: number
 }
 
-export async function getBudgetSummary(db: DB, year: number, month: number): Promise<BudgetSummary> {
+export async function getBudgetSummary(
+  db: DB,
+  year: number,
+  month: number,
+  opts: { accrual?: boolean } = {},
+): Promise<BudgetSummary> {
   const [budgets, breakdown, labels, income] = await Promise.all([
     getCategoryBudgets(db, year, month),
-    getCategoryBreakdown(db, year, month),
+    getCategoryBreakdown(db, year, month, opts),
     getCategoryLabels(db),
     getIncomeCategories(db),
   ])

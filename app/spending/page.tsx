@@ -8,6 +8,8 @@ import {
   getCategoryTrendMonths,
   getCommittedItemsWithStatus,
   getSpendByAccount,
+  getIncomeCategories,
+  getIncomeTrendMonths,
 } from '@/lib/db/queries'
 import { formatCAD } from '@/lib/format'
 import { parseMonthParams } from '@/lib/month'
@@ -38,7 +40,6 @@ export default async function SpendingPage({
   const { rules, knownCustomCategories } = await getKnownCategories(db)
   const committedItems = await getCommittedItemsWithStatus(db, year, month)
   const incomeItems = committedItems.filter((i) => i.type === 'income')
-  const incomeCategories = new Set(incomeItems.map((i) => i.category))
   const expectedIncome = incomeItems.reduce((s, i) => s + i.expectedAmount, 0)
   const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
   const income = expectedIncome
@@ -76,10 +77,16 @@ export default async function SpendingPage({
     : null
 
   const trendMonthsRaw = await getCategoryTrendMonths(db, 6)
+  // Keep the trend purely spend: exclude income categories (committed income +
+  // built-in Plaid INCOME) and any net-inflow category, so income and expenses
+  // never share the stacked bars.
+  const incomeCategorySet = await getIncomeCategories(db)
   const trendMonths = trendMonthsRaw.map((m) => ({
     ...m,
-    breakdown: m.breakdown.filter((b) => !incomeCategories.has(b.category)),
+    breakdown: m.breakdown.filter((b) => !incomeCategorySet.has(b.category) && b.total > 0),
   }))
+  const incomeTrendMonths = await getIncomeTrendMonths(db, 6)
+  const hasIncomeTrend = incomeTrendMonths.some((m) => m.breakdown.length > 0)
   // Unlabeled transfers: category is still TRANSFER_IN or TRANSFER_OUT (meaning no customCategory applied)
   const unlabeledTransfers = transactions.filter(
     (tx) => (tx.category === 'TRANSFER_IN' || tx.category === 'TRANSFER_OUT') && !tx.ignored
@@ -319,9 +326,20 @@ export default async function SpendingPage({
         <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
           Spending trend
         </h3>
-        <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by category</p>
+        <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by category · smoothed</p>
         <SpendingTrendChart months={trendMonths} />
       </Card>
+
+      {/* 6-month income trend */}
+      {hasIncomeTrend && (
+        <Card className="mb-[18px]">
+          <h3 className="font-[family-name:var(--font-fraunces)] font-normal text-[19px] text-[var(--ink)]">
+            Income trend
+          </h3>
+          <p className="text-[13px] text-[var(--muted-text)] mt-0.5">Last 6 months by source · smoothed</p>
+          <SpendingTrendChart months={incomeTrendMonths} />
+        </Card>
+      )}
 
       {/* Unlabeled transfers alert */}
       <TransferAlert

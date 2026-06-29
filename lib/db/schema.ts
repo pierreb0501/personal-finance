@@ -41,6 +41,10 @@ export const transactions = sqliteTable('transactions', {
   pending: integer('pending').notNull(),
   customCategory: text('custom_category'),
   ignored: integer('ignored').notNull().default(0),
+  // Accrual amortization: NULL/1 books in the posting month (default); N>1 spreads
+  // the amount over N months starting the posting month. Analytics-only — the raw
+  // posting is never altered. See lib/amortize.ts.
+  spreadMonths: integer('spread_months'),
 }, (table) => [
   index('transactions_date_idx').on(table.date),
   index('transactions_account_id_idx').on(table.accountId),
