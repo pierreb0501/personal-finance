@@ -8,6 +8,10 @@ export const items = sqliteTable('items', {
   institutionName: text('institution_name').notNull(),
   createdAt: integer('created_at').notNull(),
   status: text('status').notNull().default('ok'), // 'ok' | 'login_required' | 'error'
+  // The exact Plaid error_code (e.g. ITEM_LOGIN_REQUIRED, PENDING_EXPIRATION,
+  // INSTITUTION_DOWN) behind a non-ok status. Null when status is 'ok'. Lets the
+  // UI show *why* a connection dropped instead of forcing a Plaid dashboard dig.
+  errorCode: text('error_code'),
 })
 
 export const accounts = sqliteTable('accounts', {

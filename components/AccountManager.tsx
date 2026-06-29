@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Trash2, Plus, AlertTriangle, Loader2 } from 'lucide-react'
 import { removeAccount } from '@/app/actions'
+import { describePlaidError } from '@/lib/plaid-errors'
 import { Card } from './Card'
 
 type Account = {
@@ -19,6 +20,7 @@ type Item = {
   id: string
   institutionName: string
   status: string
+  errorCode: string | null
   accounts: Account[]
 }
 
@@ -89,6 +91,12 @@ export function AccountManager({ items: initialItems }: { items: Item[] }) {
                 </span>
               )}
             </div>
+
+            {item.status !== 'ok' && (
+              <p className="text-[11px] text-[var(--faint)] mb-2 -mt-1">
+                {describePlaidError(item.errorCode)}
+              </p>
+            )}
 
             {item.accounts.map((account) => (
               <div

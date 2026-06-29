@@ -87,7 +87,7 @@ export async function getCreditCardBalances(db: DB) {
 
 export async function getBrokenItems(db: DB) {
   return db
-    .select({ id: schema.items.id, institutionName: schema.items.institutionName })
+    .select({ id: schema.items.id, institutionName: schema.items.institutionName, errorCode: schema.items.errorCode })
     .from(schema.items)
     .where(eq(schema.items.status, 'login_required'))
     .all()
@@ -106,6 +106,7 @@ export async function getAllItemsWithAccounts(db: DB) {
     id: item.id,
     institutionName: item.institutionName,
     status: item.status,
+    errorCode: item.errorCode,
     accounts: accountRows.filter((a) => a.itemId === item.id),
   }))
 }

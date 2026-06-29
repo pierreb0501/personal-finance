@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePlaidLink } from 'react-plaid-link'
 import { AlertTriangle, Loader2 } from 'lucide-react'
+import { describePlaidError } from '@/lib/plaid-errors'
 
-type BrokenItem = { id: string; institutionName: string }
+type BrokenItem = { id: string; institutionName: string; errorCode: string | null }
 
 function ReconnectItem({ item, onDone }: { item: BrokenItem; onDone: () => void }) {
   const router = useRouter()
@@ -49,6 +50,7 @@ function ReconnectItem({ item, onDone }: { item: BrokenItem; onDone: () => void 
     <button
       onClick={fetchTokenAndOpen}
       disabled={loading}
+      title={describePlaidError(item.errorCode)}
       className="text-[12px] font-medium underline underline-offset-2 hover:no-underline cursor-pointer disabled:opacity-60"
     >
       {loading ? <Loader2 size={11} className="inline animate-spin mr-1" /> : null}
@@ -68,7 +70,7 @@ export function ReconnectBanner({ items }: { items: BrokenItem[] }) {
       <AlertTriangle size={13} className="shrink-0" />
       <span className="text-[12px]">
         {visible.length === 1
-          ? 'An account connection needs attention:'
+          ? describePlaidError(visible[0].errorCode)
           : `${visible.length} account connections need attention:`}
       </span>
       <div className="flex items-center gap-3">

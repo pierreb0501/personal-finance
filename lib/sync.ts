@@ -24,9 +24,10 @@ export async function syncAll(db: DB = defaultDb) {
 async function syncItemReconcilingStatus(db: DB, item: Item) {
   try {
     await syncItem(db, item)
-    // A previously broken item that now syncs cleanly is healthy again.
-    if (item.status !== 'ok') {
-      await db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
+    // A previously broken item that now syncs cleanly is healthy again — clear
+    // both the status and the stale error_code that explained the old failure.
+    if (item.status !== 'ok' || item.errorCode !== null) {
+      await db.update(schema.items).set({ status: 'ok', errorCode: null }).where(eq(schema.items.id, item.id)).run()
     }
   } catch (err) {
     console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
@@ -40,7 +41,8 @@ async function syncItemReconcilingStatus(db: DB, item: Item) {
         ? 'error'
         : null
     if (status) {
-      await db.update(schema.items).set({ status }).where(eq(schema.items.id, item.id)).run()
+      // Persist the exact code (null if Plaid gave none) so the UI can explain why.
+      await db.update(schema.items).set({ status, errorCode: plaidErrorCode ?? null }).where(eq(schema.items.id, item.id)).run()
     }
   }
 }
