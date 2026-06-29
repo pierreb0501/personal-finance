@@ -1,6 +1,7 @@
 import { formatCAD } from '@/lib/format'
 import { CategoryChip } from './CategoryChip'
 import { IgnoreButton } from './IgnoreButton'
+import { SpreadButton } from './SpreadButton'
 import { Repeat2 } from 'lucide-react'
 import type { CategoryRule } from '@/lib/categories'
 
@@ -20,6 +21,7 @@ type Transaction = {
   category: string
   customCategory?: string | null
   ignored?: number
+  spreadMonths?: number | null
   accountLabel?: string
   isCardPayment?: boolean
 }
@@ -41,6 +43,7 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
   const initial = merchantInitial(tx.merchantName, tx.category)
   const ignored = Boolean(tx.ignored)
   const isCredit = tx.amount < 0
+  const spread = tx.spreadMonths && tx.spreadMonths > 1 ? tx.spreadMonths : null
 
   return (
     <div
@@ -72,6 +75,14 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
             {ignored && (
               <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)] bg-[#f0ede5] px-1.5 py-0.5 rounded-full shrink-0">
                 Ignored
+              </span>
+            )}
+            {spread && !ignored && (
+              <span
+                title={`Spread over ${spread} months on trends & budget`}
+                className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent-dark)] bg-[#e6f1ea] px-1.5 py-0.5 rounded-full shrink-0"
+              >
+                ÷{spread}
               </span>
             )}
             {isRecurring && !ignored && (
@@ -109,6 +120,7 @@ export function TransactionRow({ tx, rules: _rules, knownCustomCategories, isRec
           </p>
           <p className="text-[11px] text-[var(--faint)] mt-0.5">{formatDate(tx.date)}</p>
         </div>
+        {!ignored && <SpreadButton txId={tx.id} spreadMonths={tx.spreadMonths ?? null} />}
         <IgnoreButton txId={tx.id} ignored={ignored} />
       </div>
     </div>

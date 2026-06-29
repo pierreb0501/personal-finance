@@ -3,7 +3,8 @@ import type { DB } from './db/index'
 import * as schema from './db/schema'
 import { db as defaultDb } from './db/index'
 import { plaidClient } from './plaid'
-import { applyAllCategoryRules } from './db/queries'
+import { applyAllCategoryRules, CARD_PAYMENT_INFLOW_CATEGORIES } from './db/queries'
+import { normalizeMerchantName } from './normalize'
 
 type Item = typeof schema.items.$inferSelect
 
@@ -23,9 +24,10 @@ export async function syncAll(db: DB = defaultDb) {
 async function syncItemReconcilingStatus(db: DB, item: Item) {
   try {
     await syncItem(db, item)
-    // A previously broken item that now syncs cleanly is healthy again.
-    if (item.status !== 'ok') {
-      await db.update(schema.items).set({ status: 'ok' }).where(eq(schema.items.id, item.id)).run()
+    // A previously broken item that now syncs cleanly is healthy again — clear
+    // both the status and the stale error_code that explained the old failure.
+    if (item.status !== 'ok' || item.errorCode !== null) {
+      await db.update(schema.items).set({ status: 'ok', errorCode: null }).where(eq(schema.items.id, item.id)).run()
     }
   } catch (err) {
     console.error(`Sync failed for item ${item.institutionName}:`, (err as Error).message)
@@ -39,7 +41,8 @@ async function syncItemReconcilingStatus(db: DB, item: Item) {
         ? 'error'
         : null
     if (status) {
-      await db.update(schema.items).set({ status }).where(eq(schema.items.id, item.id)).run()
+      // Persist the exact code (null if Plaid gave none) so the UI can explain why.
+      await db.update(schema.items).set({ status, errorCode: plaidErrorCode ?? null }).where(eq(schema.items.id, item.id)).run()
     }
   }
 }
@@ -62,10 +65,10 @@ export async function syncSingleItem(db: DB = defaultDb, item: Item) {
 
 export async function syncItem(db: DB, item: Item) {
   // 1. Sync accounts first — needed to build plaidAccountId → internal UUID map
-  const accountMap = await syncAccounts(db, item)
+  const { map: accountMap, creditAccountIds } = await syncAccounts(db, item)
 
   // 2. Sync transactions
-  await syncTransactions(db, item, accountMap)
+  await syncTransactions(db, item, accountMap, creditAccountIds)
 
   // 3. Sync holdings (optional — skip on error)
   try {
@@ -82,7 +85,10 @@ export async function syncItem(db: DB, item: Item) {
   }
 }
 
-async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
+async function syncAccounts(
+  db: DB,
+  item: Item,
+): Promise<{ map: Map<string, string>; creditAccountIds: Set<string> }> {
   const response = await plaidClient.accountsGet({ access_token: item.accessToken })
   const plaidAccounts = response.data.accounts
   const ts = Math.floor(Date.now() / 1000)
@@ -100,10 +106,14 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
   const existingIds = new Map(existing.map((e) => [e.plaidAccountId, e.id]))
 
   const map = new Map<string, string>()
+  // Credit-type accounts, by Plaid account_id — used to protect card-payment
+  // detection when deciding whether to name a merchantless inflow (see syncTransactions).
+  const creditAccountIds = new Set<string>()
 
   for (const acc of plaidAccounts) {
     const id = existingIds.get(acc.account_id) ?? crypto.randomUUID()
     map.set(acc.account_id, id)
+    if (acc.type === 'credit') creditAccountIds.add(acc.account_id)
 
     await db.insert(schema.accounts)
       .values({
@@ -129,10 +139,15 @@ async function syncAccounts(db: DB, item: Item): Promise<Map<string, string>> {
       .run()
   }
 
-  return map
+  return { map, creditAccountIds }
 }
 
-async function syncTransactions(db: DB, item: Item, accountMap: Map<string, string>) {
+async function syncTransactions(
+  db: DB,
+  item: Item,
+  accountMap: Map<string, string>,
+  creditAccountIds: Set<string>,
+) {
   let cursor = item.cursor ?? undefined
   let hasMore = true
 
@@ -156,13 +171,29 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
           continue
         }
 
+        // Fall back to a normalized form of the raw descriptor when Plaid has no
+        // enriched merchant. This gives the row a readable, stable name AND makes
+        // it eligible for merchant category rules (which key on merchant_name).
+        //
+        // One carve-out: the card-payment heuristic in lib/db/queries.ts treats a
+        // merchantless inflow on a CREDIT account in a payment-ish category as a
+        // payment (vs a store refund, which keeps a merchant). Naming exactly those
+        // rows would make real card payments register as income, so we leave them
+        // null. Everything else — spend, refunds, bank-account income — gets named.
+        const looksLikeCardPaymentInflow =
+          creditAccountIds.has(t.account_id) &&
+          t.amount < 0 &&
+          CARD_PAYMENT_INFLOW_CATEGORIES.has(t.personal_finance_category?.primary ?? 'OTHER')
+        const merchantName =
+          t.merchant_name ?? (looksLikeCardPaymentInflow ? null : normalizeMerchantName(t.name))
+
         await tx.insert(schema.transactions)
           .values({
             id: t.transaction_id,
             accountId,
             amount: t.amount,
             date: t.date,
-            merchantName: t.merchant_name ?? null,
+            merchantName,
             rawName: t.name ?? null,
             category: t.personal_finance_category?.primary ?? 'OTHER',
             categoryDetailed: t.personal_finance_category?.detailed ?? 'OTHER_OTHER',
@@ -173,7 +204,7 @@ async function syncTransactions(db: DB, item: Item, accountMap: Map<string, stri
             set: {
               amount: t.amount,
               date: t.date,
-              merchantName: t.merchant_name ?? null,
+              merchantName,
               rawName: t.name ?? null,
               category: t.personal_finance_category?.primary ?? 'OTHER',
               categoryDetailed: t.personal_finance_category?.detailed ?? 'OTHER_OTHER',

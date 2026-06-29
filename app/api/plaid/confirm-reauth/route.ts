@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing itemId' }, { status: 400 })
     }
 
-    db.update(items).set({ status: 'ok' }).where(eq(items.id, itemId)).run()
+    db.update(items).set({ status: 'ok', errorCode: null }).where(eq(items.id, itemId)).run()
     await syncAll()
 
     return NextResponse.json({ ok: true })

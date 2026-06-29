@@ -8,6 +8,10 @@ export const items = sqliteTable('items', {
   institutionName: text('institution_name').notNull(),
   createdAt: integer('created_at').notNull(),
   status: text('status').notNull().default('ok'), // 'ok' | 'login_required' | 'error'
+  // The exact Plaid error_code (e.g. ITEM_LOGIN_REQUIRED, PENDING_EXPIRATION,
+  // INSTITUTION_DOWN) behind a non-ok status. Null when status is 'ok'. Lets the
+  // UI show *why* a connection dropped instead of forcing a Plaid dashboard dig.
+  errorCode: text('error_code'),
 })
 
 export const accounts = sqliteTable('accounts', {
@@ -41,6 +45,10 @@ export const transactions = sqliteTable('transactions', {
   pending: integer('pending').notNull(),
   customCategory: text('custom_category'),
   ignored: integer('ignored').notNull().default(0),
+  // Accrual amortization: NULL/1 books in the posting month (default); N>1 spreads
+  // the amount over N months starting the posting month. Analytics-only — the raw
+  // posting is never altered. See lib/amortize.ts.
+  spreadMonths: integer('spread_months'),
 }, (table) => [
   index('transactions_date_idx').on(table.date),
   index('transactions_account_id_idx').on(table.accountId),

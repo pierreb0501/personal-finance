@@ -54,10 +54,18 @@ export async function POST(req: NextRequest) {
 
   if (webhook_type === 'ITEM') {
     if (webhook_code === 'ERROR' || webhook_code === 'PENDING_EXPIRATION') {
-      const errorCode = body.error?.error_code
-      const status = errorCode === 'ITEM_LOGIN_REQUIRED' ? 'login_required' : 'error'
+      // PENDING_EXPIRATION carries no error object; fall back to the webhook_code
+      // itself so the reason is still recorded (and surfaced in the UI).
+      const errorCode = body.error?.error_code ?? webhook_code
+      // Both a hard login failure and a pending expiration are fixed by the user
+      // reconnecting, so route both to the reconnect banner. Everything else is a
+      // transient sync error shown more passively.
+      const status =
+        errorCode === 'ITEM_LOGIN_REQUIRED' || webhook_code === 'PENDING_EXPIRATION'
+          ? 'login_required'
+          : 'error'
       if (item) {
-        await db.update(items).set({ status }).where(eq(items.plaidItemId, item_id)).run()
+        await db.update(items).set({ status, errorCode }).where(eq(items.plaidItemId, item_id)).run()
       }
     }
     return NextResponse.json({ ok: true })

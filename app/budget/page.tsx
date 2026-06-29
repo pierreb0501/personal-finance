@@ -31,12 +31,15 @@ export default async function BudgetPage({
     budgets = await getCategoryBudgets(db, year, month)
   }
 
+  // Budget-vs-actual uses the accrual lens: a lumpy multi-month bill (annual sub,
+  // semi-annual tuition) marked with spread_months is spread into even monthly
+  // slices so one month's actuals don't blow up against plan. See lib/amortize.ts.
   const [breakdown, { knownCustomCategories }, unlabeledTransfers, labels, summary, incomeCategories] = await Promise.all([
-    getCategoryBreakdown(db, year, month),
+    getCategoryBreakdown(db, year, month, { accrual: true }),
     getKnownCategories(db),
     getUnlabeledTransfers(db, year, month),
     getCategoryLabels(db),
-    getBudgetSummary(db, year, month),
+    getBudgetSummary(db, year, month, { accrual: true }),
     getIncomeCategories(db),
   ])
 
@@ -98,7 +101,7 @@ export default async function BudgetPage({
             Budget Planner
           </h1>
           <p className="text-[14px] text-[var(--muted-text)] mt-1">
-            Plan your spending for {MONTH_NAMES[month - 1]} {year}
+            Plan your spending for {MONTH_NAMES[month - 1]} {year} · actuals smoothed
           </p>
         </div>
         <MonthSelector year={year} month={month} basePath="/budget" />

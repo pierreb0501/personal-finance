@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import path from 'path'
 import * as schema from '@/lib/db/schema'
 import type { DB } from '@/lib/db'
-import { getCategoryLabels, setCategoryLabel, getBudgetSummary } from '@/lib/db/queries'
+import { getCategoryLabels, setCategoryLabel, getBudgetSummary, getCategoryBreakdown, setTransactionSpread } from '@/lib/db/queries'
 
 function createTestDb(): DB {
   const sqlite = new Database(':memory:')
@@ -20,9 +20,11 @@ async function seedAccount(db: DB) {
   await db.insert(schema.accounts).values({ id: 'acc1', itemId: 'item1', plaidAccountId: 'pa1', name: 'Checking', type: 'depository', subtype: 'checking', balanceCurrent: 5000, balanceAvailable: 5000, isoCurrencyCode: 'CAD', updatedAt: now() }).run()
 }
 let txSeq = 0
-async function seedTx(db: DB, t: { amount: number; date: string; category: string; merchantName?: string | null }) {
+async function seedTx(db: DB, t: { amount: number; date: string; category: string; merchantName?: string | null; spreadMonths?: number | null }): Promise<string> {
   txSeq += 1
-  await db.insert(schema.transactions).values({ id: `tx${txSeq}`, accountId: 'acc1', amount: t.amount, date: t.date, merchantName: t.merchantName ?? null, rawName: t.merchantName ?? null, category: t.category, categoryDetailed: t.category, pending: 0, customCategory: null, ignored: 0 }).run()
+  const id = `tx${txSeq}`
+  await db.insert(schema.transactions).values({ id, accountId: 'acc1', amount: t.amount, date: t.date, merchantName: t.merchantName ?? null, rawName: t.merchantName ?? null, category: t.category, categoryDetailed: t.category, pending: 0, customCategory: null, ignored: 0, spreadMonths: t.spreadMonths ?? null }).run()
+  return id
 }
 async function seedBudget(db: DB, category: string, planned: number, year = 2026, month = 6) {
   await db.insert(schema.categoryBudgets).values({ id: `b-${category}`, category, year, month, planned }).run()
@@ -124,5 +126,54 @@ describe('getBudgetSummary', () => {
     expect(s.totalBudget).toBe(0)
     expect(s.flexibleRemaining).toBe(0)
     expect(s.unbudgetedCount).toBe(0)
+  })
+})
+
+describe('amortized spend (accrual vs cash)', () => {
+  let db: DB
+  beforeEach(() => { db = createTestDb(); txSeq = 0 })
+
+  it('cash breakdown books the full amount in the posting month; accrual books one slice', async () => {
+    await seedAccount(db)
+    await seedTx(db, { amount: 6000, date: '2026-06-10', category: 'Tuition', spreadMonths: 6 })
+
+    const cash = await getCategoryBreakdown(db, 2026, 6)
+    expect(cash.find((c) => c.category === 'Tuition')?.total).toBe(6000)
+
+    const accrual = await getCategoryBreakdown(db, 2026, 6, { accrual: true })
+    expect(accrual.find((c) => c.category === 'Tuition')?.total).toBe(1000)
+  })
+
+  it('accrual slices a spread tx into later months it never posted in', async () => {
+    await seedAccount(db)
+    await seedTx(db, { amount: 6000, date: '2026-03-10', category: 'Tuition', spreadMonths: 6 })
+
+    // No posting in June, but the March spread reaches it.
+    const cashJune = await getCategoryBreakdown(db, 2026, 6)
+    expect(cashJune.find((c) => c.category === 'Tuition')).toBeUndefined()
+
+    const accrualJune = await getCategoryBreakdown(db, 2026, 6, { accrual: true })
+    expect(accrualJune.find((c) => c.category === 'Tuition')?.total).toBe(1000)
+  })
+
+  it('getBudgetSummary accrual totalSpent uses the monthly slice, cash uses the full amount', async () => {
+    await seedAccount(db)
+    await seedBudget(db, 'Tuition', 1000); await setCategoryLabel(db, 'Tuition', 'flexible')
+    await seedTx(db, { amount: 6000, date: '2026-06-10', category: 'Tuition', spreadMonths: 6 })
+
+    const cash = await getBudgetSummary(db, 2026, 6)
+    expect(cash.totalSpent).toBe(6000) // would blow the $1000 plan
+
+    const accrual = await getBudgetSummary(db, 2026, 6, { accrual: true })
+    expect(accrual.totalSpent).toBe(1000) // matches the plan
+    expect(accrual.flexibleSpent).toBe(1000)
+  })
+
+  it('setTransactionSpread clears with months <= 1 (back to posting-month cash)', async () => {
+    await seedAccount(db)
+    const id = await seedTx(db, { amount: 6000, date: '2026-06-10', category: 'Tuition', spreadMonths: 6 })
+    await setTransactionSpread(db, id, 1)
+    const accrual = await getCategoryBreakdown(db, 2026, 6, { accrual: true })
+    expect(accrual.find((c) => c.category === 'Tuition')?.total).toBe(6000)
   })
 })
