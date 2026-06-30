@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { db } from '@/lib/db'
 import {
-  getMonthlySpend,
   getTransactionsForMonth,
   getBudgetSummary,
   getKnownCategories,
@@ -33,7 +32,6 @@ export default async function SpendingPage({
   const { year, month } = parseMonthParams(await searchParams)
   const now = new Date()
 
-  const spend = await getMonthlySpend(db, year, month)
   const summary = await getBudgetSummary(db, year, month)
   const spendByAccount = await getSpendByAccount(db, year, month)
   const transactions = await getTransactionsForMonth(db, year, month)
@@ -42,39 +40,39 @@ export default async function SpendingPage({
   const incomeItems = committedItems.filter((i) => i.type === 'income')
   const expectedIncome = incomeItems.reduce((s, i) => s + i.expectedAmount, 0)
   const confirmedIncome = incomeItems.reduce((s, i) => s + (i.confirmedAmount ?? 0), 0)
-  const income = expectedIncome
+  // One income figure used for both the headline and every derived metric: money
+  // actually received, falling back to expected when nothing has landed yet.
+  const income = confirmedIncome > 0 ? confirmedIncome : expectedIncome
+  // One spend figure everywhere: consumption (bills + flexible). Savings
+  // contributions are excluded — moving money to savings isn't spending.
+  const spend = summary.totalSpent
 
-  // Budget progress (total budget vs total spent). Tell the spending-vs-budget
-  // story with summary.totalSpent everywhere so the card value, % sub-line, and
-  // bar all agree on one spend number (getMonthlySpend differs — it includes
-  // income categories / net-negative categories).
-  const hasBudget = summary.totalBudget > 0
-  const spendRatio = hasBudget ? summary.totalSpent / summary.totalBudget : 0
-  const budgetRemaining = summary.totalBudget - summary.totalSpent
-  const spentPct = hasBudget
-    ? Math.round((summary.totalSpent / summary.totalBudget) * 100)
-    : null
+  // Budget progress: consumption spend vs the consumption budget (bills +
+  // flexible), so spend and budget exclude savings on both sides and the %,
+  // bar, and over/under all agree.
+  const hasBudget = summary.spendBudget > 0
+  const spendRatio = hasBudget ? spend / summary.spendBudget : 0
+  const budgetRemaining = summary.spendBudget - spend
+  const spentPct = hasBudget ? Math.round(spendRatio * 100) : null
 
-  const savings = income > 0 ? income - spend : null
-  const savingsRate = income > 0 ? ((income - spend) / income) * 100 : null
+  // Net cash flow: what's left after consumption (savings stays yours, so it
+  // counts as kept, not spent). Negative = you outspent your income this month.
+  const net = income > 0 ? income - spend : null
 
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1
   const dayOfMonth = now.getDate()
   const daysInMonth = new Date(year, month, 0).getDate()
-  // Month-end forecast: bills + savings are lumpy/committed, so hold them at
-  // their budgeted value; only the variable (flexible) spend is projected by
-  // elapsed-days pace. Avoids a day-1 rent payment exploding the projection.
+  // Month-end forecast: flexible spend is variable, so project it by elapsed-days
+  // pace. Bills are lumpy/committed — hold them at the greater of budgeted vs
+  // already-paid so the forecast can never land below what's actually been spent.
   const projectedFlexible = isCurrentMonth
     ? (summary.flexibleSpent / dayOfMonth) * daysInMonth
     : null
   const projectedSpend = projectedFlexible !== null
-    ? summary.billsBudget + summary.savingsBudget + projectedFlexible
+    ? Math.max(summary.billsBudget, summary.billsSpent) + projectedFlexible
     : null
-  const projectedRemaining = projectedSpend !== null ? summary.totalBudget - projectedSpend : null
-  const projectedSavings = projectedSpend !== null && income > 0 ? income - projectedSpend : null
-  const projectedSavingsRate = projectedSavings !== null && income > 0
-    ? (projectedSavings / income) * 100
-    : null
+  const projectedRemaining = projectedSpend !== null ? summary.spendBudget - projectedSpend : null
+  const projectedNet = projectedSpend !== null && income > 0 ? income - projectedSpend : null
 
   const trendMonthsRaw = await getCategoryTrendMonths(db, 6)
   // Keep the trend purely spend: exclude income categories (committed income +
@@ -114,10 +112,10 @@ export default async function SpendingPage({
         <Card padding="sm">
           <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Spent</p>
           <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
-            {formatCAD(summary.totalSpent)}
+            {formatCAD(spend)}
           </p>
           <p className="text-[12px] text-[var(--muted-text)] mt-1">
-            {spentPct !== null ? `${spentPct}% of budget` : '— of budget'}
+            {spentPct !== null ? `${spentPct}% of ${formatCAD(summary.spendBudget)} budget` : 'no budget set'}
           </p>
         </Card>
 
@@ -126,14 +124,14 @@ export default async function SpendingPage({
           {income > 0 ? (
             <>
               <p className="font-bold text-[30px] tracking-tight tabular-nums leading-none text-[var(--ink)]">
-                {formatCAD(confirmedIncome > 0 ? confirmedIncome : income)}
+                {formatCAD(income)}
               </p>
-              {confirmedIncome > 0 && confirmedIncome < income ? (
-                <p className="text-[12px] text-[var(--muted-text)] mt-1">of {formatCAD(income)} expected</p>
+              {confirmedIncome > 0 && confirmedIncome < expectedIncome ? (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1">of {formatCAD(expectedIncome)} expected</p>
               ) : confirmedIncome === 0 ? (
-                <p className="text-[12px] text-[var(--faint)] mt-1">expected · vs {formatCAD(spend)} spent</p>
+                <p className="text-[12px] text-[var(--faint)] mt-1">expected · none received yet</p>
               ) : (
-                <p className="text-[12px] text-[var(--muted-text)] mt-1">vs {formatCAD(spend)} spent</p>
+                <p className="text-[12px] text-[var(--muted-text)] mt-1">received</p>
               )}
             </>
           ) : (
@@ -179,22 +177,20 @@ export default async function SpendingPage({
         </Card>
 
         <Card padding="sm">
-          {savings !== null ? (
+          {net !== null ? (
             <>
-              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Saved</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--faint)]">Net</p>
               <p
                 className={[
                   'font-bold text-[30px] tracking-tight tabular-nums leading-none mt-2',
-                  savings >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
+                  net >= 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]',
                 ].join(' ')}
               >
-                {savings >= 0 ? formatCAD(savings) : `-${formatCAD(Math.abs(savings))}`}
+                {net >= 0 ? `+${formatCAD(net)}` : `-${formatCAD(Math.abs(net))}`}
               </p>
-              {savingsRate !== null && (
-                <p className="text-[12px] text-[var(--muted-text)] mt-1">
-                  {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
-                </p>
-              )}
+              <p className="text-[12px] text-[var(--muted-text)] mt-1 tabular-nums">
+                {formatCAD(income)} in · {formatCAD(spend)} out
+              </p>
             </>
           ) : hasBudget ? (
             <>
@@ -282,9 +278,9 @@ export default async function SpendingPage({
                     : `${formatCAD(Math.abs(projectedRemaining))} over`}
                 </div>
               )}
-              {projectedSavingsRate !== null && (
-                <p className="text-[12px] text-[var(--muted-text)] mt-1.5">
-                  {projectedSavingsRate >= 0 ? '+' : ''}{projectedSavingsRate.toFixed(1)}% projected savings rate
+              {projectedNet !== null && (
+                <p className="text-[12px] text-[var(--muted-text)] mt-1.5 tabular-nums">
+                  projected net {projectedNet >= 0 ? `+${formatCAD(projectedNet)}` : `-${formatCAD(Math.abs(projectedNet))}`}
                 </p>
               )}
             </div>

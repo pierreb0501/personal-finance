@@ -1756,7 +1756,12 @@ export async function getIncomeCategories(db: DB): Promise<Set<string>> {
 
 export type BudgetSummary = {
   totalBudget: number; billsBudget: number; flexibleBudget: number; savingsBudget: number
-  totalSpent: number; flexibleSpent: number; flexibleRemaining: number
+  // Consumption budget: bills + flexible, i.e. totalBudget minus the savings plan.
+  spendBudget: number
+  // totalSpent is CONSUMPTION (bills + flexible). Money moved into savings-kind
+  // categories is tracked separately in savingsSpent and is NOT counted as spend.
+  totalSpent: number; billsSpent: number; flexibleSpent: number; savingsSpent: number
+  flexibleRemaining: number
   unbudgetedSpend: number; unbudgetedCount: number
 }
 
@@ -1787,16 +1792,24 @@ export async function getBudgetSummary(
     else flexibleBudget += b.planned
   }
 
-  let totalSpent = 0, flexibleSpent = 0, unbudgetedSpend = 0, unbudgetedCount = 0
+  let totalSpent = 0, billsSpent = 0, flexibleSpent = 0, savingsSpent = 0
+  let unbudgetedSpend = 0, unbudgetedCount = 0
   for (const c of spendRows) {
+    const k = kindOf(c.category)
+    // Savings contributions are money you keep, not money you spend — track them
+    // separately and exclude from the consumption total.
+    if (k === 'savings') { savingsSpent += c.total; continue }
     totalSpent += c.total
-    if (kindOf(c.category) === 'flexible') flexibleSpent += c.total
+    if (k === 'fixed') billsSpent += c.total
+    else flexibleSpent += c.total
     if (!plannedCats.has(c.category)) { unbudgetedSpend += c.total; unbudgetedCount += 1 }
   }
 
   return {
     totalBudget, billsBudget, flexibleBudget, savingsBudget,
-    totalSpent, flexibleSpent, flexibleRemaining: flexibleBudget - flexibleSpent,
+    spendBudget: billsBudget + flexibleBudget,
+    totalSpent, billsSpent, flexibleSpent, savingsSpent,
+    flexibleRemaining: flexibleBudget - flexibleSpent,
     unbudgetedSpend, unbudgetedCount,
   }
 }

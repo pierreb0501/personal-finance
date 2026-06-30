@@ -57,3 +57,6 @@ finance-dev.db-wal
 
 # Git worktrees
 .worktrees/
+
+# Claude Code — machine-local settings (keep shared settings.json committed if added)
+.claude/settings.local.json

@@ -9,7 +9,7 @@ type Props = {
 }
 
 export function BudgetSummaryCard({ data }: Props) {
-  const { totalBudget, totalSpent, flexibleRemaining, unbudgetedSpend } = data
+  const { totalBudget, spendBudget, totalSpent, flexibleRemaining, unbudgetedSpend } = data
 
   // Empty state: no budget set
   if (totalBudget === 0) {
@@ -32,7 +32,9 @@ export function BudgetSummaryCard({ data }: Props) {
   }
 
   const isOver = flexibleRemaining < 0
-  const progressRatio = totalBudget > 0 ? totalSpent / totalBudget : 0
+  // Compare consumption spend against the consumption budget (bills + flexible);
+  // savings is excluded from both so the bar isn't diluted by the savings plan.
+  const progressRatio = spendBudget > 0 ? totalSpent / spendBudget : 0
 
   return (
     <Card>
@@ -57,7 +59,7 @@ export function BudgetSummaryCard({ data }: Props) {
       {/* Overall budget progress bar */}
       <ProgressBar value={progressRatio} className="mt-3.5" />
       <p className="text-[12px] text-[var(--muted-text)] mt-1.5 tabular-nums">
-        {formatCAD(totalSpent)} of {formatCAD(totalBudget)} budget
+        {formatCAD(totalSpent)} of {formatCAD(spendBudget)} budget
       </p>
 
       {/* Unbudgeted spend note */}

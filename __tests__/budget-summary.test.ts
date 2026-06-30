@@ -59,6 +59,22 @@ describe('getBudgetSummary', () => {
     expect(s.billsBudget).toBe(2150)
     expect(s.flexibleBudget).toBe(400)
     expect(s.savingsBudget).toBe(500)
+    expect(s.spendBudget).toBe(2550) // bills + flexible, excludes savings
+  })
+
+  it('savings spend is tracked separately and excluded from totalSpent', async () => {
+    await seedAccount(db)
+    await seedBudget(db, 'Rent', 2150); await setCategoryLabel(db, 'Rent', 'fixed')
+    await seedBudget(db, 'Grocery', 400); await setCategoryLabel(db, 'Grocery', 'flexible')
+    await seedBudget(db, 'Invest', 500); await setCategoryLabel(db, 'Invest', 'savings')
+    await seedTx(db, { amount: 2150, date: '2026-06-01', category: 'Rent' })
+    await seedTx(db, { amount: 300, date: '2026-06-05', category: 'Grocery' })
+    await seedTx(db, { amount: 500, date: '2026-06-10', category: 'Invest' })
+    const s = await getBudgetSummary(db, 2026, 6)
+    expect(s.billsSpent).toBe(2150)
+    expect(s.flexibleSpent).toBe(300)
+    expect(s.savingsSpent).toBe(500)
+    expect(s.totalSpent).toBe(2450) // bills + flexible only; savings excluded
   })
 
   it('flexibleRemaining = flexibleBudget - flexible spend', async () => {

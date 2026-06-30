@@ -5,6 +5,7 @@ import {
   Bar,
   XAxis,
   YAxis,
+  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
@@ -19,6 +20,11 @@ type MonthData = {
 
 type Props = {
   months: MonthData[]
+}
+
+function formatAxisCAD(n: number): string {
+  if (n >= 1000) return `$${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`
+  return `$${n}`
 }
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; fill: string }[]; label?: string }) {
@@ -71,13 +77,25 @@ export function SpendingTrendChart({ months }: Props) {
     <div className="mt-4 -mx-1" style={{ height: 220 }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 4, right: 4, left: 4, bottom: 0 }} barCategoryGap="30%">
+          <CartesianGrid
+            vertical={false}
+            stroke="var(--faint)"
+            strokeOpacity={0.25}
+            strokeDasharray="3 3"
+          />
           <XAxis
             dataKey="label"
             tick={{ fontSize: 11, fill: 'var(--faint)' }}
             axisLine={false}
             tickLine={false}
           />
-          <YAxis hide />
+          <YAxis
+            tick={{ fontSize: 11, fill: 'var(--faint)' }}
+            tickFormatter={formatAxisCAD}
+            axisLine={false}
+            tickLine={false}
+            width={40}
+          />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f5f2ec', opacity: 0.8 }} />
           {allKeys.map((cat, i) => (
             <Bar

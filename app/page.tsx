@@ -3,11 +3,9 @@ import { db } from '@/lib/db'
 import {
   getLatestSnapshot,
   getAllSnapshotHistory,
-  getMonthlySpend,
   getCategoryBreakdown,
   getAllHoldings,
   getRecentTransactions,
-  getSetting,
   getAllAccounts,
   getUnlabeledTransfers,
   getCreditCardBalances,
@@ -54,8 +52,6 @@ export default async function OverviewPage() {
   const history = await getAllSnapshotHistory(db)
   const _d = new Date()
   const budget = await getBudgetSummary(db, _d.getFullYear(), _d.getMonth() + 1)
-  const monthlySpend = await getMonthlySpend(db)
-  const income = Number((await getSetting(db, 'income')) ?? '0')
   const categories = await getCategoryBreakdown(db)
   const holdings = await getAllHoldings(db)
   const transactions = await getRecentTransactions(db, 4)
@@ -64,8 +60,6 @@ export default async function OverviewPage() {
   const unlabeledTransfers = await getUnlabeledTransfers(db)
   const cardBalances = await getCreditCardBalances(db)
   const totalOwed = cardBalances.reduce((s, c) => s + c.balance, 0)
-
-  const savingsRate = income > 0 ? ((income - monthlySpend) / income) * 100 : null
 
   // Allocation donut: by account type
   const investmentsVal = latest?.investmentsValue ?? 0
@@ -85,9 +79,22 @@ export default async function OverviewPage() {
     { label: 'Other', value: otherVal, color: PALETTE[6] },
   ].filter((s) => s.value > 0)
 
-  // Today's investments delta (last 2 snapshots)
-  const prevSnapshot = history.length >= 2 ? history[history.length - 2] : null
+  // Investments delta vs the most recent *earlier* snapshot whose value actually
+  // differs — Plaid investment balances refresh slowly, so consecutive daily
+  // snapshots are often identical. Comparing against the last distinct value
+  // shows the real move, and we label it with that snapshot's date rather than a
+  // hardcoded "today" (the latest snapshot may be several days stale).
+  const prevSnapshot =
+    [...history.slice(0, -1)]
+      .reverse()
+      .find((s) => s.investmentsValue !== investmentsVal) ?? null
   const investDelta = prevSnapshot ? investmentsVal - prevSnapshot.investmentsValue : null
+  const investDeltaSince = prevSnapshot
+    ? new Date(`${prevSnapshot.date}T00:00:00`).toLocaleDateString('en-CA', {
+        month: 'short',
+        day: 'numeric',
+      })
+    : null
 
   return (
     <div className="px-8 md:px-11 py-9 pb-24 md:pb-9 max-w-[1100px]">
@@ -137,23 +144,19 @@ export default async function OverviewPage() {
             <p className="font-bold text-[24px] tracking-tight tabular-nums leading-none mt-2 text-[var(--ink)]">
               {latest ? formatCAD(latest.investmentsValue) : '—'}
             </p>
-            {investDelta !== null && (
+            {investDelta !== null ? (
               <span
                 className={[
                   'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-2',
                   investDelta >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
                 ].join(' ')}
               >
-                {investDelta >= 0 ? '▲' : '▼'} {investDelta >= 0 ? '+' : ''}{formatCAD(investDelta)} today
+                {investDelta >= 0 ? '▲ +' : '▼ '}{formatCAD(investDelta)} since {investDeltaSince}
               </span>
-            )}
-            {savingsRate !== null && (
-              <div className={[
-                'inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-3',
-                savingsRate >= 0 ? 'bg-[#e6f1ea] text-[var(--positive)]' : 'bg-[#f6e8e4] text-[var(--negative)]',
-              ].join(' ')}>
-                {savingsRate >= 0 ? '▲' : '▼'} {savingsRate >= 0 ? '+' : ''}{savingsRate.toFixed(1)}% savings rate
-              </div>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[12px] font-semibold px-2 py-0.5 rounded-full mt-2 bg-[#f0ede7] text-[var(--muted-text)]">
+                No change yet
+              </span>
             )}
           </Card>
         </div>
